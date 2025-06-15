@@ -523,10 +523,10 @@ test "Example 3" {
     try std.testing.expectEqualSlices(i16, &[_]i16{ 0, 79, 111, 78, 8, -61, -90, -68, -13, 42, 67, 53, 13, -27, -46, -38, -12, 14, 24, 19, 6, -4, -5, 0 }, r.samples);
 }
 
-test "stereo.flac" {
-    std.debug.print("---------- stereo.flac ----------\n", .{});
+test "01 - blocksize 4096.flac" {
+    std.debug.print("---------- 01 - blocksize 4096.flac ----------\n", .{});
 
-    const file = try std.fs.cwd().openFile("flac-test-files/stereo.flac", .{});
+    const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/01 - blocksize 4096.flac", .{});
     defer file.close();
 
     var r = try decode(std.testing.allocator, file.reader());
