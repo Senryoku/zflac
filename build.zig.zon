@@ -1,0 +1,11 @@
+.{
+    .name = .zflac,
+    .version = "0.0.0",
+    .fingerprint = 0x829dffec85a68435,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
