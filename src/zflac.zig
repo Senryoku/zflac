@@ -256,6 +256,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
     while (frame_sample_offset < samples.len) {
         var frame_header: FrameHeader = undefined;
         var bit_reader = std.io.bitReader(.big, reader);
+        std.debug.print("(reader offset: {d})\n", .{try reader.context.getPos()});
         frame_header.frame_sync = try bit_reader.readBitsNoEof(u15, 15);
         if (frame_header.frame_sync != (0xFFF8 >> 1))
             return error.InvalidFrameHeader;
@@ -287,7 +288,16 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
 
         switch (frame_header.blocking_strategy) {
             .fixed => {
-                const frame_number = try reader.readInt(u8, .big);
+                const first_byte = try reader.readInt(u8, .big);
+                if (first_byte == 0xFF) return error.InvalidFrameNumber;
+                const byte_count = @clz(first_byte ^ 0xFF);
+                var frame_number: u32 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
+                if (byte_count > 0) {
+                    for (0..byte_count - 1) |_| {
+                        frame_number <<= 6;
+                        frame_number |= (try reader.readInt(u8, .big)) & 0x3F;
+                    }
+                }
                 std.debug.print("  frame_number: {d}\n", .{frame_number});
             },
             .variable => return error.NotImplemented,
@@ -351,7 +361,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
                         var warmup_sample = try bit_reader.readBitsNoEof(u32, switch (frame_header.channels) {
                             .LRLeftSideStereo => if (channel == 1) bits_per_sample + 1 else bits_per_sample,
                             .LRSideRightStereo => if (channel == 0) bits_per_sample + 1 else bits_per_sample,
-                            .LRMidSideStereo => if (channel == 0) bits_per_sample + 1 else bits_per_sample,
+                            .LRMidSideStereo => if (channel == 1) bits_per_sample + 1 else bits_per_sample,
                             else => bits_per_sample,
                         });
                         if (bits_per_sample < 16) {

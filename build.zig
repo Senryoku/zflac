@@ -54,4 +54,24 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    const example_module = b.createModule(.{
+        .root_source_file = b.path("examples/example.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zflac", .module = lib_mod },
+        },
+    });
+    const example = b.addExecutable(.{
+        .name = "example",
+        .root_module = example_module,
+    });
+
+    b.installArtifact(example);
+
+    const run_example = b.addRunArtifact(example);
+    run_example.step.dependOn(b.getInstallStep());
+    const run_step = b.step("run", "Run example");
+    run_step.dependOn(&run_example.step);
 }
