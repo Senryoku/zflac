@@ -15,5 +15,5 @@ fn run_standard_test(comptime filename: []const u8) !void {
 }
 
 pub fn main() !void {
-    try run_standard_test("03 - blocksize 16");
+    try run_standard_test("19 - samplerate 35467Hz");
 }
