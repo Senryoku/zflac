@@ -296,21 +296,19 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
             return error.InvalidFrameHeader;
         log_frame.debug("frame header: {any} (frame_sample_offset: {d})", .{ frame_header, frame_sample_offset });
 
+        const first_byte = try reader.readInt(u8, .big);
+        if (first_byte == 0xFF) return error.InvalidFrameNumber;
+        const byte_count = @clz(first_byte ^ 0xFF);
+        var coded_number: u32 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
+        if (byte_count > 0) {
+            for (0..byte_count - 1) |_| {
+                coded_number <<= 6;
+                coded_number |= (try reader.readInt(u8, .big)) & 0x3F;
+            }
+        }
         switch (frame_header.blocking_strategy) {
-            .Fixed => {
-                const first_byte = try reader.readInt(u8, .big);
-                if (first_byte == 0xFF) return error.InvalidFrameNumber;
-                const byte_count = @clz(first_byte ^ 0xFF);
-                var frame_number: u32 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
-                if (byte_count > 0) {
-                    for (0..byte_count - 1) |_| {
-                        frame_number <<= 6;
-                        frame_number |= (try reader.readInt(u8, .big)) & 0x3F;
-                    }
-                }
-                log_frame.debug("  frame_number: {d}", .{frame_number});
-            },
-            .Variable => return error.NotImplemented,
+            .Fixed => log_frame.debug("  Frame number: {d}", .{coded_number}),
+            .Variable => log_frame.debug("  Sample number: {d}", .{coded_number}),
         }
 
         const block_size: u16 = switch (frame_header.block_size) {
