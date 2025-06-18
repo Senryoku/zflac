@@ -317,13 +317,8 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
             std.crypto.hash.Md5.hash(decoded._samples, &computed_md5, .{});
         }
 
-        if (!std.mem.eql(u8, &computed_md5, &stream_info.?.md5)) {
-            if (builtin.is_test) {
-                log.err("Invalid checksum", .{});
-            } else {
-                return error.InvalidChecksum;
-            }
-        }
+        if (!std.mem.eql(u8, &computed_md5, &stream_info.?.md5))
+            return error.InvalidChecksum;
 
         // The MD5 checksum is computed on sign extended values (12 to 16 for example), however it seems
         // output conventions differ quite a bit. I don't known if I should do this here, or let the caller deal with it.
