@@ -268,6 +268,9 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
     if (stream_info == null)
         return error.MissingStreamInfo;
 
+    if (stream_info.?.sample_bit_depth > 16)
+        return error.UnsupportedBitDepth;
+
     var first_frame = true;
     var sample_rate: u24 = undefined;
     var channel_count: u4 = undefined;
@@ -372,7 +375,16 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
             }
 
             switch (subframe_header.subframe_type) {
-                0b000000 => return error.Unimplemented, // Constant subframe
+                0b000000 => { // Constant subframe
+                    const sample = try read_unencoded_sample(&bit_reader, wasted_bits, bits_per_sample);
+                    if (channel_count == 1) {
+                        @memset(samples[frame_sample_offset..][0..block_size], sample);
+                    } else {
+                        for (0..block_size) |i| {
+                            samples[frame_sample_offset + channel_count * i + channel] = sample;
+                        }
+                    }
+                },
                 0b000001 => { // Verbatim subframe
                     for (0..block_size) |i| {
                         samples[frame_sample_offset + channel_count * i + channel] = try read_unencoded_sample(&bit_reader, wasted_bits, bits_per_sample);
@@ -433,9 +445,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !@This() {
                     // Predictor coefficients (n = predictor coefficient precision * LPC order).
                     var predictor_coefficient: [32]i16 = undefined;
                     for (0..order) |i| {
-                        var r = try bit_reader.readBitsNoEof(u16, coefficient_precision);
-                        if ((@as(u16, 1) << (coefficient_precision - 1)) & r != 0) r |= @as(u16, 0xFFFF) << coefficient_precision;
-                        predictor_coefficient[i] = @bitCast(r);
+                        predictor_coefficient[i] = try read_unencoded_sample(&bit_reader, 0, coefficient_precision);
                         log_subframe.debug("    predictor_coefficient[{d}]: {d}", .{ i, predictor_coefficient[i] });
                     }
 
