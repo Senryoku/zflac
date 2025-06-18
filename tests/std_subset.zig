@@ -12,7 +12,14 @@ fn run_standard_test(comptime filename: []const u8) !void {
     defer expected_samples_file.close();
     const expected = try expected_samples_file.readToEndAlloc(std.testing.allocator, std.math.maxInt(usize));
     defer std.testing.allocator.free(expected);
-    try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], r.samples);
+
+    switch (r.sample_bit_size()) {
+        8 => try std.testing.expectEqualSlices(i8, @as([*]const i8, @alignCast(@ptrCast(expected)))[0..expected.len], try r.samples(i8)),
+        16 => try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], try r.samples(i16)),
+        24 => try std.testing.expectEqualSlices(i24, @as([*]const i24, @alignCast(@ptrCast(expected)))[0 .. expected.len / 3], try r.samples(i24)),
+        32 => try std.testing.expectEqualSlices(i32, @as([*]const i32, @alignCast(@ptrCast(expected)))[0 .. expected.len / 4], try r.samples(i32)),
+        else => unreachable,
+    }
 }
 
 test "01 - blocksize 4096" {
