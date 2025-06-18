@@ -16,7 +16,13 @@ fn run_standard_test(comptime filename: []const u8) !void {
     switch (r.sample_bit_size()) {
         8 => try std.testing.expectEqualSlices(i8, @as([*]const i8, @alignCast(@ptrCast(expected)))[0..expected.len], try r.samples(i8)),
         16 => try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], try r.samples(i16)),
-        24 => try std.testing.expectEqualSlices(i24, @as([*]const i24, @alignCast(@ptrCast(expected)))[0 .. expected.len / 3], try r.samples(i24)),
+        24 => {
+            const expected_i24 = @as([*]const i24, @alignCast(@ptrCast(expected)))[0 .. expected.len / 3];
+            const samples_i32 = try r.samples(i32);
+            for (0..expected_i24.len) |i| {
+                try std.testing.expectEqual(expected_i24[i], @as(i24, @intCast(samples_i32[i])));
+            }
+        },
         32 => try std.testing.expectEqualSlices(i32, @as([*]const i32, @alignCast(@ptrCast(expected)))[0 .. expected.len / 4], try r.samples(i32)),
         else => unreachable,
     }

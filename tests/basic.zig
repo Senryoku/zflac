@@ -90,6 +90,7 @@ test "Example 3" {
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(1, r.channels);
-    try std.testing.expectEqual(24, (try r.samples(i16)).len);
-    try std.testing.expectEqualSlices(i16, &[_]i16{ 0, 79, 111, 78, 8, -61, -90, -68, -13, 42, 67, 53, 13, -27, -46, -38, -12, 14, 24, 19, 6, -4, -5, 0 }, try r.samples(i16));
+    const samples = try r.samples(i8);
+    try std.testing.expectEqual(24, samples.len);
+    try std.testing.expectEqualSlices(i8, &[_]i8{ 0, 79, 111, 78, 8, -61, -90, -68, -13, 42, 67, 53, 13, -27, -46, -38, -12, 14, 24, 19, 6, -4, -5, 0 }, samples);
 }

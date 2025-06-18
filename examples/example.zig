@@ -15,5 +15,5 @@ fn run_standard_test(comptime filename: []const u8) !void {
 }
 
 pub fn main() !void {
-    try run_standard_test("44 - 8-channel surround, 192kHz, 24 bit, using only 32nd order predictors");
+    try run_standard_test("22 - 12 bit per sample");
 }

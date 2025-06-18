@@ -24,8 +24,9 @@ const DecodedFLAC = struct {
 
     pub fn samples(self: @This(), comptime SampleType: type) ![]SampleType {
         const expected_bit_size = self.sample_bit_size();
-        if (@bitSizeOf(SampleType) != expected_bit_size) return error.UnexpectedSampleType;
-        return @as([*]SampleType, @alignCast(@ptrCast(self._samples.ptr)))[0 .. self._samples.len / (expected_bit_size / 8)];
+        const container_bit_size = try std.math.ceilPowerOfTwo(u8, expected_bit_size);
+        if (@bitSizeOf(SampleType) != container_bit_size) return error.UnexpectedSampleType;
+        return @as([*]SampleType, @alignCast(@ptrCast(self._samples.ptr)))[0 .. self._samples.len / (container_bit_size / 8)];
     }
 };
 
@@ -176,6 +177,7 @@ fn read_unary_integer(bit_reader: anytype) !u32 {
 
 /// Reads a signed integer with a runtime known bit depth
 fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
+    if (bit_depth == 0) return 0;
     const container_type = switch (@bitSizeOf(T)) {
         8 => u8,
         16 => u16,
@@ -267,8 +269,8 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
                     .min_frame_size = try bit_reader.readBitsNoEof(u24, 24),
                     .max_frame_size = try bit_reader.readBitsNoEof(u24, 24),
                     .sample_rate = try bit_reader.readBitsNoEof(u20, 20),
-                    .channel_count = try bit_reader.readBitsNoEof(u3, 3),
-                    .sample_bit_depth = try bit_reader.readBitsNoEof(u5, 5),
+                    .channel_count = try bit_reader.readBitsNoEof(u3, 3), // NOTE: channel count - 1
+                    .sample_bit_depth = try bit_reader.readBitsNoEof(u5, 5), // NOTE: bits per sample - 1
                     .number_of_samples = try bit_reader.readBitsNoEof(u36, 36),
                     .md5 = try reader.readBytesNoEof(16),
                 };
@@ -292,19 +294,27 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     if (stream_info) |si| {
         const sample_bit_size: u8 = std.mem.alignForward(u8, si.sample_bit_depth, 8);
 
-        const samples = try switch (sample_bit_size) {
+        const decoded = try switch (sample_bit_size) {
             8 => decode_frames(i8, allocator, si, reader),
             16 => decode_frames(i16, allocator, si, reader),
-            24 => decode_frames(i24, allocator, si, reader),
+            24 => decode_frames(i32, allocator, si, reader),
             32 => decode_frames(i32, allocator, si, reader),
             else => return error.Unimplemented,
         };
-        errdefer allocator.free(samples);
+        errdefer decoded.deinit(allocator);
 
         var computed_md5: [16]u8 = undefined;
-        std.crypto.hash.Md5.hash(samples, &computed_md5, .{});
-
-        log.debug("samples: {d}", .{samples.len});
+        if (sample_bit_size == 24) {
+            // While zig does support i24, i24 in arrays are still 4 bytes aligned. Might as well use i32.
+            const samples_32 = try decoded.samples(i32);
+            var d = std.crypto.hash.Md5.init(.{});
+            for (0..samples_32.len) |i| {
+                d.update(std.mem.asBytes(&@as(i24, @intCast(samples_32[i]))));
+            }
+            d.final(&computed_md5);
+        } else {
+            std.crypto.hash.Md5.hash(decoded._samples, &computed_md5, .{});
+        }
 
         if (!std.mem.eql(u8, &computed_md5, &stream_info.?.md5)) {
             if (builtin.is_test) {
@@ -314,16 +324,24 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
             }
         }
 
-        return .{
-            .channels = si.channel_count,
-            .sample_rate = si.sample_rate,
-            .bits_per_sample = si.sample_bit_depth,
-            ._samples = samples,
-        };
+        return decoded;
     } else return error.MissingStreamInfo;
 }
 
-fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream_info: StreaminfoMetadata, reader: anytype) ![]align(16) u8 {
+fn read_coded_number(bit_reader: anytype) !u64 {
+    const first_byte = try bit_reader.readBitsNoEof(u8, 8);
+    const byte_count = @clz(first_byte ^ 0xFF);
+    if (first_byte == 0xFF or byte_count == 1) return error.InvalidCodedNumber;
+    if (byte_count == 0) return first_byte;
+    var coded_number: u64 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
+    for (0..byte_count - 1) |_| {
+        coded_number <<= 6;
+        coded_number |= (try bit_reader.readBitsNoEof(u8, 8)) & 0x3F;
+    }
+    return coded_number;
+}
+
+fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream_info: StreaminfoMetadata, reader: anytype) !DecodedFLAC {
     // Larger type for intermediate computations
     const InterType = switch (SampleType) {
         i8 => i16,
@@ -333,13 +351,16 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         else => unreachable,
     };
 
+    if (stream_info.number_of_samples == 0) return error.UnknownNumberOfSamples; // This is valid, but unsupported for now.
+
     var first_frame = true;
     var sample_rate: u24 = undefined;
     var channel_count: u4 = undefined;
     var bit_depth: BitDepth = undefined;
     var bits_per_sample: u6 = undefined;
 
-    const samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * (@as(usize, stream_info.channel_count) + 1) * stream_info.number_of_samples, 16, null);
+    const total_sample_count = (@as(usize, stream_info.channel_count) + 1) * stream_info.number_of_samples;
+    const samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
     errdefer allocator.free(samples_backing);
 
     var samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
@@ -362,16 +383,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             return error.InvalidFrameHeader;
         log_frame.debug("frame header: {any} (frame_sample_offset: {d})", .{ frame_header, frame_sample_offset });
 
-        const first_byte = try reader.readInt(u8, .big);
-        if (first_byte == 0xFF) return error.InvalidFrameNumber;
-        const byte_count = @clz(first_byte ^ 0xFF);
-        var coded_number: u64 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
-        if (byte_count > 0) {
-            for (0..byte_count - 1) |_| {
-                coded_number <<= 6;
-                coded_number |= (try reader.readInt(u8, .big)) & 0x3F;
-            }
-        }
+        const coded_number = try read_coded_number(&bit_reader);
         switch (frame_header.blocking_strategy) {
             .Fixed => log_frame.debug("  Frame number: {d}", .{coded_number}),
             .Variable => log_frame.debug("  Sample number: {d}", .{coded_number}),
@@ -383,7 +395,11 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             0b0010...0b0101 => |b| 144 * std.math.pow(u16, 2, b),
             // Uncommon block size
             0b0110 => @as(u16, try reader.readInt(u8, .big)) + 1,
-            0b0111 => try reader.readInt(u16, .big) + 1,
+            0b0111 => bs: {
+                const ubs = try reader.readInt(u16, .big);
+                if (ubs == std.math.maxInt(u16)) return error.InvalidFrameHeader;
+                break :bs ubs + 1;
+            },
             0b1000...0b1111 => |b| std.math.pow(u16, 2, b),
         };
         log_frame.debug("  block_size: {d}", .{block_size});
@@ -567,5 +583,10 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         frame_sample_offset += @as(usize, @intCast(channel_count)) * block_size;
     }
 
-    return samples_backing;
+    return .{
+        .channels = channel_count,
+        .sample_rate = sample_rate,
+        .bits_per_sample = bits_per_sample,
+        ._samples = samples_backing,
+    };
 }
