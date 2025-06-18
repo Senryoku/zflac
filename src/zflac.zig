@@ -365,7 +365,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         const first_byte = try reader.readInt(u8, .big);
         if (first_byte == 0xFF) return error.InvalidFrameNumber;
         const byte_count = @clz(first_byte ^ 0xFF);
-        var coded_number: u32 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
+        var coded_number: u64 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
         if (byte_count > 0) {
             for (0..byte_count - 1) |_| {
                 coded_number <<= 6;
@@ -564,7 +564,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             else => {},
         }
 
-        frame_sample_offset += channel_count * block_size;
+        frame_sample_offset += @as(usize, @intCast(channel_count)) * block_size;
     }
 
     return samples_backing;
