@@ -8,7 +8,7 @@ const log_residual = std.log.scoped(.zflac_residual);
 
 const Signature: u32 = 0x664C6143;
 
-const DecodedFLAC = struct {
+pub const DecodedFLAC = struct {
     channels: u8,
     sample_rate: u24,
     bits_per_sample: u8,
@@ -292,7 +292,8 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     }
 
     if (stream_info) |si| {
-        const sample_bit_size: u8 = std.mem.alignForward(u8, si.sample_bit_depth, 8);
+        const sample_bit_depth = si.sample_bit_depth + 1;
+        const sample_bit_size: u8 = std.mem.alignForward(u8, sample_bit_depth, 8);
 
         const decoded = try switch (sample_bit_size) {
             8 => decode_frames(i8, allocator, si, reader),
@@ -322,6 +323,32 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
             } else {
                 return error.InvalidChecksum;
             }
+        }
+
+        // The MD5 checksum is computed on sign extended values (12 to 16 for example), however it seems
+        // output conventions differ quite a bit. I don't known if I should do this here, or let the caller deal with it.
+        //   ( - Use unsigned u8 for 8bits per samples. )
+        //   - Up 12bits samples to 16bits by multiplying by 16.
+        //   - Up 24bits samples to 32bits by multiplying by 256.
+        switch (sample_bit_depth) {
+            // 8 => {
+            //     for (0..decoded._samples.len) |i| {
+            //         decoded._samples[i] +%= 128;
+            //     }
+            // },
+            9...15 => |bd| {
+                var samples_16 = try decoded.samples(i16);
+                for (0..samples_16.len) |i| {
+                    samples_16[i] <<= @intCast(16 - bd);
+                }
+            },
+            17...31 => |bd| {
+                var samples_32 = try decoded.samples(i32);
+                for (0..samples_32.len) |i| {
+                    samples_32[i] <<= @intCast(@as(u6, 32) - bd);
+                }
+            },
+            else => {},
         }
 
         return decoded;

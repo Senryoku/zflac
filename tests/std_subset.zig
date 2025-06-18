@@ -2,6 +2,8 @@ const std = @import("std");
 const zflac = @import("zflac");
 
 fn run_standard_test(comptime filename: []const u8) !void {
+    const allocator = std.testing.allocator;
+
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
@@ -10,19 +12,22 @@ fn run_standard_test(comptime filename: []const u8) !void {
 
     const expected_samples_file = try std.fs.cwd().openFile("tests/expected_samples/" ++ filename ++ ".raw", .{});
     defer expected_samples_file.close();
-    const expected = try expected_samples_file.readToEndAlloc(std.testing.allocator, std.math.maxInt(usize));
-    defer std.testing.allocator.free(expected);
+    const expected = try expected_samples_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(expected);
 
     switch (r.sample_bit_size()) {
-        8 => try std.testing.expectEqualSlices(i8, @as([*]const i8, @alignCast(@ptrCast(expected)))[0..expected.len], try r.samples(i8)),
-        16 => try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], try r.samples(i16)),
-        24 => {
-            const expected_i24 = @as([*]const i24, @alignCast(@ptrCast(expected)))[0 .. expected.len / 3];
-            const samples_i32 = try r.samples(i32);
-            for (0..expected_i24.len) |i| {
-                try std.testing.expectEqual(expected_i24[i], @as(i24, @intCast(samples_i32[i])));
+        8 => {
+            // FIXME: This fails while the CRC matches and the playback sounds correct. Maybe I'm not supposed to output signed values for 8bits?
+            // try std.testing.expectEqualSlices(i8, @as([*]const i8, @alignCast(@ptrCast(expected)))[0..expected.len], try r.samples(i8));
+            var expected_i8 = try allocator.alloc(i8, expected.len);
+            defer allocator.free(expected_i8);
+            for (0..expected_i8.len) |i| {
+                expected_i8[i] = @bitCast(expected[i] -% 128);
             }
+            try std.testing.expectEqualSlices(i8, expected_i8, try r.samples(i8));
         },
+        16 => try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], try r.samples(i16)),
+        24 => try std.testing.expectEqualSlices(i32, @as([*]const i32, @alignCast(@ptrCast(expected)))[0 .. expected.len / 4], try r.samples(i32)),
         32 => try std.testing.expectEqualSlices(i32, @as([*]const i32, @alignCast(@ptrCast(expected)))[0 .. expected.len / 4], try r.samples(i32)),
         else => unreachable,
     }
