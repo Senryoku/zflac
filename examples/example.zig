@@ -20,7 +20,7 @@ const PlayState = struct {
         switch (self.file.sample_bit_size()) {
             8 => self._fill(i8, i16, output, frame_count),
             16 => self._fill(i16, i16, output, frame_count),
-            24 => self._fill(i32, i24, output, frame_count),
+            24 => self._fill(i32, i32, output, frame_count),
             32 => self._fill(i32, i32, output, frame_count),
             else => unreachable,
         }
@@ -46,7 +46,7 @@ const PlayState = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const r = try decode_standard_test(allocator, "28 - high resolution audio, default settings");
+    const r = try decode_standard_test(allocator, "37 - 20 bit per sample");
     defer r.deinit(allocator);
 
     zaudio.init(allocator);
@@ -65,7 +65,7 @@ pub fn main() !void {
     audio_device_config.playback.format = switch (r.sample_bit_size()) {
         8 => .signed16,
         16 => .signed16,
-        24 => .signed24,
+        24 => .signed32,
         32 => .signed32,
         else => return error.UnsupportedSampleBitSize,
     };

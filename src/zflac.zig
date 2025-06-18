@@ -169,14 +169,14 @@ const SubframeHeader = packed struct {
     wasted_bit_flag: u1,
 };
 
-fn read_unary_integer(bit_reader: anytype) !u32 {
+inline fn read_unary_integer(bit_reader: anytype) !u32 {
     var unary_integer: u32 = 0;
     while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
     return unary_integer;
 }
 
 /// Reads a signed integer with a runtime known bit depth
-fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
+inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
     if (bit_depth == 0) return 0;
     const container_type = switch (@bitSizeOf(T)) {
         8 => u8,
@@ -229,8 +229,12 @@ fn decode_residuals(comptime ResidualType: type, allocator: std.mem.Allocator, b
         if ((coding_method == 0b00 and rice_parameter == 0b1111) or (coding_method == 0b01 and rice_parameter == 0b11111)) {
             // No rice parameter
             const bit_depth: u5 = try bit_reader.readBitsNoEof(u5, 5);
-            for (0..count) |i|
-                residuals[partition_start_idx + i] = try read_signed_integer(ResidualType, bit_reader, bit_depth);
+            if (bit_depth == 0) {
+                @memset(residuals[partition_start_idx..][0..count], 0);
+            } else {
+                for (0..count) |i|
+                    residuals[partition_start_idx + i] = try read_signed_integer(ResidualType, bit_reader, bit_depth);
+            }
         } else {
             const UnsignedResidualType = std.meta.Int(.unsigned, @bitSizeOf(ResidualType));
             for (0..count) |i| {
@@ -292,10 +296,10 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     }
 
     if (stream_info) |si| {
-        const sample_bit_depth = si.sample_bit_depth + 1;
-        const sample_bit_size: u8 = std.mem.alignForward(u8, sample_bit_depth, 8);
+        const sample_bit_depth = @as(u8, si.sample_bit_depth) + 1;
+        const aligned_sample_bit_size: u8 = std.mem.alignForward(u8, sample_bit_depth, 8);
 
-        const decoded = try switch (sample_bit_size) {
+        const decoded = try switch (aligned_sample_bit_size) {
             8 => decode_frames(i8, allocator, si, reader),
             16 => decode_frames(i16, allocator, si, reader),
             24 => decode_frames(i32, allocator, si, reader),
@@ -305,12 +309,12 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
         errdefer decoded.deinit(allocator);
 
         var computed_md5: [16]u8 = undefined;
-        if (sample_bit_size == 24) {
+        if (aligned_sample_bit_size == 24) {
             // While zig does support i24, i24 in arrays are still 4 bytes aligned. Might as well use i32.
             const samples_32 = try decoded.samples(i32);
             var d = std.crypto.hash.Md5.init(.{});
             for (0..samples_32.len) |i| {
-                d.update(std.mem.asBytes(&@as(i24, @intCast(samples_32[i]))));
+                d.update(std.mem.asBytes(&samples_32[i])[0..3]);
             }
             d.final(&computed_md5);
         } else {
@@ -502,6 +506,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 0b001000...0b001100 => |t| { // Subframe with a fixed predictor of order v-8; i.e., 0, 1, 2, 3 or 4
                     const order: u3 = @intCast(t & 0b000111);
                     log_subframe.debug("  Subframe with a fixed predictor of order {d}", .{order});
+                    if (order > 4) return error.InvalidSubframeHeader;
 
                     for (0..order) |i| {
                         samples[frame_sample_offset + channel_count * i + channel] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
@@ -513,18 +518,18 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
                     for (0..block_size - order) |i| {
                         const idx = frame_sample_offset + channel_count * (order + i) + channel;
-                        switch (order) {
-                            0 => samples[idx] = @intCast(residuals[i]),
-                            1 => samples[idx] = @intCast(residuals[i] + @as(InterType, 1) * samples[idx - channel_count * 1]),
-                            2 => samples[idx] = @intCast(residuals[i] + @as(InterType, 2) * samples[idx - channel_count * 1] - @as(InterType, 1) * samples[idx - channel_count * 2]),
-                            3 => samples[idx] = @intCast(residuals[i] + @as(InterType, 3) * samples[idx - channel_count * 1] - @as(InterType, 3) * samples[idx - channel_count * 2] + @as(InterType, 1) * samples[idx - channel_count * 3]),
-                            4 => samples[idx] = @intCast(residuals[i] + @as(InterType, 4) * samples[idx - channel_count * 1] - @as(InterType, 6) * samples[idx - channel_count * 2] + @as(InterType, 4) * samples[idx - channel_count * 3] - samples[idx - channel_count * 4]),
-                            else => return error.InvalidSubframeHeader,
-                        }
+                        samples[idx] = @intCast(switch (order) {
+                            0 => residuals[i],
+                            1 => residuals[i] + @as(InterType, 1) * samples[idx - channel_count * 1],
+                            2 => residuals[i] + @as(InterType, 2) * samples[idx - channel_count * 1] - @as(InterType, 1) * samples[idx - channel_count * 2],
+                            3 => residuals[i] + @as(InterType, 3) * samples[idx - channel_count * 1] - @as(InterType, 3) * samples[idx - channel_count * 2] + @as(InterType, 1) * samples[idx - channel_count * 3],
+                            4 => residuals[i] + @as(InterType, 4) * samples[idx - channel_count * 1] - @as(InterType, 6) * samples[idx - channel_count * 2] + @as(InterType, 4) * samples[idx - channel_count * 3] - samples[idx - channel_count * 4],
+                            else => unreachable,
+                        });
                     }
                 },
                 0b100000...0b111111 => |t| { // Subframe with a linear predictor of order v-31; i.e., 1 through 32 (inclusive)
-                    const order: u6 = @intCast((t & 0b011111) + 1);
+                    const order: u6 = @intCast(t - 31);
                     log_subframe.debug("  Subframe with a linear predictor of order: {d}", .{order});
                     // Unencoded warm-up samples (n = subframe's bits per sample * LPC order).
                     for (0..order) |i| {
