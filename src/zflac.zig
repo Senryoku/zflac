@@ -263,9 +263,8 @@ inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: anytype, 
     }
 }
 
-fn decode_residuals(comptime ResidualType: type, allocator: std.mem.Allocator, block_size: u32, order: u32, bit_reader: anytype) ![]ResidualType {
-    var residuals = try allocator.alloc(ResidualType, block_size - order);
-    errdefer allocator.free(residuals);
+fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: anytype) !void {
+    std.debug.assert(residuals.len >= block_size);
 
     const coding_method = try bit_reader.readBitsNoEof(u2, 2);
     if (coding_method >= 0b10) return error.InvalidResidualCodingMethod;
@@ -304,8 +303,6 @@ fn decode_residuals(comptime ResidualType: type, allocator: std.mem.Allocator, b
         }
         partition_start_idx += count;
     }
-
-    return residuals;
 }
 
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
@@ -443,6 +440,9 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
     var samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
+    var residuals = try allocator.alloc(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096);
+    defer allocator.free(residuals);
+
     var frame_sample_offset: usize = 0;
     // TODO: Get two bytes and check for FrameSync (0xFFF8 or 0xFFF9), rather than relying on knowing the number of samples in advance?
     while (frame_sample_offset < samples.len) {
@@ -571,8 +571,10 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         log_subframe.debug("    warmup_sample: {d}", .{samples[frame_sample_offset + channel_count * i + channel]});
                     }
 
-                    const residuals = try decode_residuals(InterType, allocator, block_size, order, &bit_reader);
-                    defer allocator.free(residuals);
+                    if (residuals.len < block_size)
+                        residuals = try allocator.realloc(residuals, block_size);
+
+                    try decode_residuals(InterType, residuals, block_size, order, &bit_reader);
 
                     for (0..block_size - order) |i| {
                         const idx = frame_sample_offset + channel_count * (order + i) + channel;
@@ -608,8 +610,10 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         log_subframe.debug("    predictor_coefficient[{d}]: {d}", .{ i, predictor_coefficient[i] });
                     }
 
-                    const residuals = try decode_residuals(InterType, allocator, block_size, order, &bit_reader);
-                    defer allocator.free(residuals);
+                    if (residuals.len < block_size)
+                        residuals = try allocator.realloc(residuals, block_size);
+
+                    try decode_residuals(InterType, residuals, block_size, order, &bit_reader);
 
                     for (0..block_size - order) |i| {
                         const idx = frame_sample_offset + channel_count * (order + i) + channel;
