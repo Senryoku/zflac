@@ -170,10 +170,65 @@ const SubframeHeader = packed struct {
     wasted_bit_flag: u1,
 };
 
+const low_bit_mask = [_]u8{
+    0b00000000,
+    0b00000001,
+    0b00000011,
+    0b00000111,
+    0b00001111,
+    0b00011111,
+    0b00111111,
+    0b01111111,
+    // 0b11111111,
+};
+
+inline fn read_unary_integer_from_empty_buffer(bit_reader: anytype) !u32 {
+    std.debug.assert(bit_reader.count == 0);
+    if (try bit_reader.readBitsNoEof(u1, 1) == 0) { // Force fetching the next byte
+        std.debug.assert(bit_reader.count == 7);
+        var unary_integer: u32 = 1;
+        const buffered_bits = (bit_reader.bits << @intCast(8 - bit_reader.count)) | low_bit_mask[8 - bit_reader.count];
+        const clz = @clz(buffered_bits);
+        unary_integer += clz;
+        if (clz == bit_reader.count) {
+            bit_reader.alignToByte(); // Discard those 0 bits
+            while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1; // Revert to simple version
+        } else {
+            _ = try bit_reader.readBitsNoEof(u8, clz + 1); // Discard those bits and the 1
+        }
+        return unary_integer;
+    }
+    return 0;
+}
+
 inline fn read_unary_integer(bit_reader: anytype) !u32 {
-    var unary_integer: u32 = 0;
-    while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
-    return unary_integer;
+    if (false) {
+        // Easy to read and portable version.
+        var unary_integer: u32 = 0;
+        while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
+        return unary_integer;
+    } else {
+        // WIP: Faster version relying on the internals of std.io.bitReader
+        if (bit_reader.count == 0)
+            return try read_unary_integer_from_empty_buffer(bit_reader);
+        const buffered_bits = (bit_reader.bits << @intCast(8 - bit_reader.count)) | low_bit_mask[8 - bit_reader.count];
+        const clz = @clz(buffered_bits);
+        var unary_integer: u32 = clz;
+        if (clz == bit_reader.count) {
+            bit_reader.alignToByte(); // Discard those 0 bits
+            if (false) {
+                // Revert to simple version immediately
+                while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
+            } else {
+                // Inline a second round before reverting (NOTE: a recursive call would prevent inlining and seems to be slower)
+                unary_integer += try read_unary_integer_from_empty_buffer(bit_reader);
+            }
+            return unary_integer;
+        } else {
+            _ = try bit_reader.readBitsNoEof(u8, clz + 1); // Discard those bits and the 1
+            return unary_integer;
+        }
+    }
 }
 
 /// Reads a signed integer with a runtime known bit depth
@@ -186,6 +241,7 @@ inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: 
         64 => u64,
         else => @compileError("Unsupported container type: " ++ @typeName(T)),
     };
+
     var r = try bit_reader.readBitsNoEof(container_type, bit_depth);
     // Sign extend from bit_depth to container_type size
     if ((@as(container_type, 1) << @intCast(bit_depth - 1)) & r != 0) r |= @as(container_type, @truncate(0xFFFFFFFFFFFFFFFF)) << @intCast(bit_depth);
@@ -388,6 +444,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     var samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
     var frame_sample_offset: usize = 0;
+    // TODO: Get two bytes and check for FrameSync (0xFFF8 or 0xFFF9), rather than relying on knowing the number of samples in advance?
     while (frame_sample_offset < samples.len) {
         var frame_header: FrameHeader = undefined;
         var bit_reader = std.io.bitReader(.big, reader);
