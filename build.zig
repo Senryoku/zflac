@@ -6,16 +6,11 @@ pub fn build(b: *std.Build) void {
 
     // Library
 
-    const lib_mod = b.createModule(.{
+    const lib_mod = b.addModule("zflac", .{
         .root_source_file = b.path("src/zflac.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const lib = b.addStaticLibrary(.{
-        .name = "zflac",
-        .root_module = lib_mod,
-    });
-    b.installArtifact(lib);
 
     // Test
 
