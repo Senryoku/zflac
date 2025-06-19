@@ -17,7 +17,10 @@ fn run_standard_test(comptime filename: []const u8) *const fn (std.mem.Allocator
             };
             defer file.close();
 
-            var r = zflac.decode(allocator, file.reader()) catch |err| {
+            var buffered_reader = std.io.bufferedReader(file.reader());
+            const reader = buffered_reader.reader();
+
+            var r = zflac.decode(allocator, reader) catch |err| {
                 std.debug.panic("Failed to decode FLAC: {s}", .{@errorName(err)});
             };
             defer r.deinit(allocator);

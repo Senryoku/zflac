@@ -7,7 +7,10 @@ fn run_faulty_test(comptime filename: []const u8) !void {
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/faulty/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    var r = try zflac.decode(allocator, file.reader());
+    var buffered_reader = std.io.bufferedReader(file.reader());
+    const reader = buffered_reader.reader();
+
+    var r = try zflac.decode(allocator, reader);
     defer r.deinit(allocator);
 }
 

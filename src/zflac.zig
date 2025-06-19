@@ -257,8 +257,6 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     if (signature != Signature)
         return error.InvalidSignature;
 
-    var first_audio_frame: usize = 0;
-
     var stream_info: ?StreaminfoMetadata = null;
     while (true) {
         var header = try reader.readStruct(MetadataHeader);
@@ -289,10 +287,8 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
             else => return error.InvalidMetadataHeader,
         }
 
-        if (header.last_block) {
-            first_audio_frame = try reader.context.getPos() + header.length;
+        if (header.last_block)
             break;
-        }
     }
 
     if (stream_info) |si| {
@@ -395,7 +391,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     while (frame_sample_offset < samples.len) {
         var frame_header: FrameHeader = undefined;
         var bit_reader = std.io.bitReader(.big, reader);
-        log_frame.debug("(reader offset: {d})", .{try reader.context.getPos()});
+        // log_frame.debug("(reader offset: {d})", .{try reader.context.getPos()});
         frame_header.frame_sync = try bit_reader.readBitsNoEof(u15, 15);
         if (frame_header.frame_sync != (0xFFF8 >> 1))
             return error.InvalidFrameHeader;
