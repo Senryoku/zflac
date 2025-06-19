@@ -372,9 +372,8 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     const InterType = switch (SampleType) {
         i8 => i16,
         i16 => i32,
-        i24 => i64,
-        i32 => i64,
-        else => unreachable,
+        i24, i32 => i64,
+        else => @compileError("Unsupported sample type: " ++ @typeName(SampleType)),
     };
 
     if (stream_info.number_of_samples == 0) return error.UnknownNumberOfSamples; // This is valid, but unsupported for now.
@@ -431,9 +430,6 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         };
         log_frame.debug("  block_size: {d}", .{block_size});
 
-        // Block size of 1 not allowed except for the last frame.
-        if (block_size == 1 and frame_sample_offset + block_size < samples.len) return error.InvalidFrameHeader;
-
         const frame_sample_rate: u24 = switch (frame_header.sample_rate) {
             .StoredInMetadata => stream_info.sample_rate,
             .Uncommon8b => try reader.readInt(u8, .big),
@@ -470,6 +466,9 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 // However, we currently rely on the total number of samples to stop processing.
             }
         }
+
+        // Block size of 1 not allowed except for the last frame.
+        if (block_size == 1 and frame_sample_offset + channel_count * block_size < samples.len) return error.InvalidFrameHeader;
 
         const frame_header_crc = try reader.readInt(u8, .big);
         log_frame.debug("  frame_header_crc: {X:0>2}", .{frame_header_crc});
