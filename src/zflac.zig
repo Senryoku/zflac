@@ -39,6 +39,7 @@ const MetadataHeader = packed struct {
         VorbisComment = 4,
         Cuesheet = 5,
         Picture = 6,
+        _,
     },
     last_block: bool,
     length: u24,
@@ -280,13 +281,12 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
                 };
                 log.debug("  stream info: {any}", .{stream_info});
             },
-            .Padding => {
-                try reader.skipBytes(header.length, .{});
-            },
-            else => {
+            .Application, .Seektable, .VorbisComment, .Cuesheet, .Picture => {
                 log.info(" Unhandled header: {s}", .{@tagName(header.info)});
                 try reader.skipBytes(header.length, .{});
             },
+            .Padding => try reader.skipBytes(header.length, .{}),
+            else => return error.InvalidMetadataHeader,
         }
 
         if (header.last_block) {
@@ -351,7 +351,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
         }
 
         return decoded;
-    } else return error.MissingStreamInfo;
+    } else return error.MissingStreaminfo;
 }
 
 fn read_coded_number(bit_reader: anytype) !u64 {
@@ -385,7 +385,8 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     var bit_depth: BitDepth = undefined;
     var bits_per_sample: u6 = undefined;
 
-    const total_sample_count = (@as(usize, stream_info.channel_count) + 1) * stream_info.number_of_samples;
+    const expected_channel_count = @as(usize, stream_info.channel_count) + 1;
+    const total_sample_count = expected_channel_count * stream_info.number_of_samples;
     const samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
     errdefer allocator.free(samples_backing);
 
@@ -430,6 +431,9 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         };
         log_frame.debug("  block_size: {d}", .{block_size});
 
+        // Block size of 1 not allowed except for the last frame.
+        if (block_size == 1 and frame_sample_offset + block_size < samples.len) return error.InvalidFrameHeader;
+
         const frame_sample_rate: u24 = switch (frame_header.sample_rate) {
             .StoredInMetadata => stream_info.sample_rate,
             .Uncommon8b => try reader.readInt(u8, .big),
@@ -450,10 +454,21 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 else => |bd| bd.bps(),
             };
 
+            if (channel_count != expected_channel_count) return error.InconsistentParameters;
+
             first_frame = false;
         } else {
             // "Because not all environments in which FLAC decoders are used are able to cope with changes to these properties during playback, a decoder MAY choose to stop decoding on such a change."
             if (sample_rate != frame_sample_rate or channel_count != frame_header.channels.count() or bit_depth != frame_header.bit_depth) return error.InconsistentParameters;
+
+            const expected_samples = frame_sample_offset + @as(usize, block_size) * channel_count;
+            if (samples.len < expected_samples) {
+                return error.InvalidSampleCount;
+                // We could support reallocating the backing buffer (when the total number of samples is unknown, for streaming I guess):
+                //   samples_backing = try allocator.realloc(samples_backing, expected_samples);
+                //   samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+                // However, we currently rely on the total number of samples to stop processing.
+            }
         }
 
         const frame_header_crc = try reader.readInt(u8, .big);

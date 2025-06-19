@@ -43,6 +43,28 @@ pub fn build(b: *std.Build) void {
     const run_std_subset_tests = b.addRunArtifact(std_subset_tests);
     test_step.dependOn(&run_std_subset_tests.step);
 
+    const std_uncommon_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/std_uncommon.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zflac", .module = lib_mod },
+        },
+    }) });
+    const run_std_uncommon_tests = b.addRunArtifact(std_uncommon_tests);
+    test_step.dependOn(&run_std_uncommon_tests.step);
+
+    const std_faulty_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/std_faulty.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zflac", .module = lib_mod },
+        },
+    }) });
+    const run_std_faulty_tests = b.addRunArtifact(std_faulty_tests);
+    test_step.dependOn(&run_std_faulty_tests.step);
+
     // Examples (currently used for testing while developing)
 
     const maybe_zaudio = b.lazyDependency("zaudio", .{});
