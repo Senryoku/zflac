@@ -1,0 +1,22 @@
+name: Tests
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                submodules: 'true'
+            - name: Get zig version
+              id: zigversion
+              run: echo "version=$(cat .zigversion)" >> $GITHUB_OUTPUT
+            - uses: mlugg/setup-zig@v2
+              with:
+                version: ${{ steps.zigversion.outputs.version }}
+            - run: zig build test --summary all
