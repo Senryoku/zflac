@@ -1,5 +1,6 @@
 const std = @import("std");
 const zflac = @import("zflac");
+const zflac_ref = @import("zflac-ref");
 const zbench = @import("zbench");
 
 pub const std_options: std.Options = .{
@@ -9,7 +10,7 @@ pub const std_options: std.Options = .{
     },
 };
 
-fn run_standard_test(comptime filename: []const u8) *const fn (std.mem.Allocator) void {
+fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *const fn (std.mem.Allocator) void {
     return struct {
         fn run(allocator: std.mem.Allocator) void {
             const file = std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{}) catch |err| {
@@ -20,7 +21,7 @@ fn run_standard_test(comptime filename: []const u8) *const fn (std.mem.Allocator
             var buffered_reader = std.io.bufferedReader(file.reader());
             const reader = buffered_reader.reader();
 
-            var r = zflac.decode(allocator, reader) catch |err| {
+            var r = impl.decode(allocator, reader) catch |err| {
                 std.debug.panic("Failed to decode FLAC: {s}", .{@errorName(err)});
             };
             defer r.deinit(allocator);
@@ -97,7 +98,8 @@ pub fn main() !void {
         "63 - predictor overflow check, 24-bit",
         "64 - rice partitions with escape code zero",
     }) |filename| {
-        try bench.add(filename, run_standard_test(filename), .{});
+        try bench.add("(now) " ++ filename, run_standard_test(filename, zflac), .{});
+        try bench.add("(ref) " ++ filename, run_standard_test(filename, zflac_ref), .{});
     }
     try bench.run(std.io.getStdOut().writer());
 }

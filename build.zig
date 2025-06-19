@@ -90,12 +90,14 @@ pub fn build(b: *std.Build) void {
     }
     const maybe_zbench = b.lazyDependency("zbench", .{});
     if (maybe_zbench) |zbench| {
+        const zflac_ref = b.dependency("zflac", .{}); // Previous version to compare against
         const benchmark_module = b.createModule(.{
             .root_source_file = b.path("benchmarks/std_subset.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zflac", .module = lib_mod },
+                .{ .name = "zflac-ref", .module = zflac_ref.module("zflac") },
                 .{ .name = "zbench", .module = zbench.module("zbench") },
             },
         });
