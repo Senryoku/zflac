@@ -1,6 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const zflac = @import("zflac");
 const zflac_ref = @import("zflac-ref");
+
 const zbench = @import("zbench");
 
 pub const std_options: std.Options = .{
@@ -8,6 +11,25 @@ pub const std_options: std.Options = .{
     .log_scope_levels = &[_]std.log.ScopeLevel{
         // .{ .scope = .zflac, .level = .info },
     },
+};
+
+const UTF8ConsoleOutput = struct {
+    original: if (builtin.os.tag == .windows) c_uint else void,
+
+    fn init() UTF8ConsoleOutput {
+        if (builtin.os.tag == .windows) {
+            const original = std.os.windows.kernel32.GetConsoleOutputCP();
+            _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
+            return .{ .original = original };
+        }
+        return .{ .original = {} };
+    }
+
+    fn deinit(self: UTF8ConsoleOutput) void {
+        if (builtin.os.tag == .windows) {
+            _ = std.os.windows.kernel32.SetConsoleOutputCP(self.original);
+        }
+    }
 };
 
 fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *const fn (std.mem.Allocator) void {
@@ -30,6 +52,9 @@ fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *con
 }
 
 pub fn main() !void {
+    const cp_out = UTF8ConsoleOutput.init();
+    defer cp_out.deinit();
+
     var bench = zbench.Benchmark.init(std.heap.page_allocator, .{});
     defer bench.deinit();
     inline for (&[_][]const u8{
