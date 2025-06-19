@@ -8,6 +8,11 @@
             .hash = "zaudio-0.11.0-dev-_M-91mJkPwB7NWGKgDvdpl3xyjkk301Tp6ubbsleUvVK",
             .lazy = true,
         },
+        .zbench = .{
+            .url = "git+https://github.com/hendriknielaender/zBench#c64bb43a3e32c5c62c02058ad7247e072301708d",
+            .hash = "zbench-0.10.0-YTdc714iAQDO4lTHMnIljYHPZ5v_sNTsw75vAmO1pyT-",
+            .lazy = true,
+        },
     },
     .paths = .{
         "build.zig",

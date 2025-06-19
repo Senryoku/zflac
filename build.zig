@@ -93,4 +93,28 @@ pub fn build(b: *std.Build) void {
         const run_step = b.step("run", "Run example");
         run_step.dependOn(&run_example.step);
     }
+    const maybe_zbench = b.lazyDependency("zbench", .{});
+    if (maybe_zbench) |zbench| {
+        const benchmark_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/std_subset.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zflac", .module = lib_mod },
+                .{ .name = "zbench", .module = zbench.module("zbench") },
+            },
+        });
+
+        const benchmark = b.addExecutable(.{
+            .name = "benchmark",
+            .root_module = benchmark_module,
+        });
+
+        b.installArtifact(benchmark);
+
+        const run_benchmark = b.addRunArtifact(benchmark);
+        run_benchmark.step.dependOn(b.getInstallStep());
+        const run_step = b.step("bench", "Run benchmark");
+        run_step.dependOn(&run_benchmark.step);
+    }
 }
