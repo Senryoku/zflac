@@ -406,15 +406,15 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     } else return error.MissingStreaminfo;
 }
 
-fn read_coded_number(bit_reader: anytype) !u64 {
-    const first_byte = try bit_reader.readBitsNoEof(u8, 8);
+fn read_coded_number(reader: anytype) !u64 {
+    const first_byte = try reader.readByte();
     const byte_count = @clz(first_byte ^ 0xFF);
     if (first_byte == 0xFF or byte_count == 1) return error.InvalidCodedNumber;
     if (byte_count == 0) return first_byte;
     var coded_number: u64 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
     for (0..byte_count - 1) |_| {
         coded_number <<= 6;
-        coded_number |= (try bit_reader.readBitsNoEof(u8, 8)) & 0x3F;
+        coded_number |= (try reader.readByte()) & 0x3F;
     }
     return coded_number;
 }
@@ -451,13 +451,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         if (frame_header.frame_sync != (0xFFF8 >> 1))
             return error.InvalidFrameHeader;
 
-        var bit_reader = std.io.bitReader(.big, reader);
-
-        const coded_number = try read_coded_number(&bit_reader);
+        const coded_number = try read_coded_number(&reader);
         switch (frame_header.blocking_strategy) {
             .Fixed => log_frame.debug("  Frame number: {d}", .{coded_number}),
             .Variable => log_frame.debug("  Sample number: {d}", .{coded_number}),
         }
+
+        var bit_reader = std.io.bitReader(.big, reader);
 
         const block_size: u16 = switch (frame_header.block_size) {
             0b0000 => return error.InvalidFrameHeader, // Reserved
