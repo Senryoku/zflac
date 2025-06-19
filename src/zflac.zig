@@ -419,6 +419,133 @@ fn read_coded_number(reader: anytype) !u64 {
     return coded_number;
 }
 
+inline fn fixed_predictor(comptime SampleType: type, comptime InterType: type, comptime order: u6, block_size: u16, channel_count: u16, samples: []SampleType, residuals: []const InterType) void {
+    // if (order == 4) return fixed_predictor_4(SampleType, InterType, block_size, channel_count, samples, residuals);
+    if (order == 4) return linear_predictor_4(SampleType, InterType, block_size, channel_count, 0, [4]SampleType{ 4, -6, 4, -1 }, samples, residuals);
+    for (0..block_size - order) |i| {
+        const idx = channel_count * (order + i);
+        samples[idx] = @intCast(switch (order) {
+            0 => residuals[i],
+            1 => residuals[i] + @as(InterType, 1) * samples[idx - channel_count * 1],
+            2 => residuals[i] + @as(InterType, 2) * samples[idx - channel_count * 1] - @as(InterType, 1) * samples[idx - channel_count * 2],
+            3 => residuals[i] + @as(InterType, 3) * samples[idx - channel_count * 1] - @as(InterType, 3) * samples[idx - channel_count * 2] + @as(InterType, 1) * samples[idx - channel_count * 3],
+            4 => residuals[i] + @as(InterType, 4) * samples[idx - channel_count * 1] - @as(InterType, 6) * samples[idx - channel_count * 2] + @as(InterType, 4) * samples[idx - channel_count * 3] - samples[idx - channel_count * 4],
+            else => unreachable,
+        });
+    }
+}
+
+inline fn linear_predictor_4(comptime SampleType: type, comptime InterType: type, block_size: u16, channel_count: u16, coefficient_shift_right: u6, predictor_coefficient: [4]SampleType, samples: []SampleType, residuals: []const InterType) void {
+    const order = 4;
+    var rolling_vector = @Vector(4, InterType){
+        samples[channel_count * order - channel_count * 1],
+        samples[channel_count * order - channel_count * 2],
+        samples[channel_count * order - channel_count * 3],
+        samples[channel_count * order - channel_count * 4],
+    };
+    const factors = [4]@Vector(4, InterType){
+        .{ predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3] },
+        .{ predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[0] },
+        .{ predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[0], predictor_coefficient[1] },
+        .{ predictor_coefficient[3], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2] },
+    };
+    for (0..(block_size - order) / 4) |j| {
+        const v_residuals = [4]@Vector(4, InterType){
+            .{ 0, 0, 0, residuals[4 * j + 0] },
+            .{ 0, 0, residuals[4 * j + 1], 0 },
+            .{ 0, residuals[4 * j + 2], 0, 0 },
+            .{ residuals[4 * j + 3], 0, 0, 0 },
+        };
+        inline for (0..4) |i| {
+            rolling_vector[3 - (i % 4)] = @reduce(.Add, factors[i] * rolling_vector) >> @intCast(coefficient_shift_right);
+            rolling_vector += v_residuals[i];
+            const idx = channel_count * (order + 4 * j + i);
+            samples[idx] = @intCast(rolling_vector[3 - (i % 4)]);
+        }
+    }
+    for (0..(block_size - order) % 4) |i| {
+        const idx = channel_count * (order + 4 * ((block_size - order) / 4) + i);
+        const r = @reduce(.Add, factors[0] * @Vector(4, InterType){
+            samples[idx - channel_count * 1],
+            samples[idx - channel_count * 2],
+            samples[idx - channel_count * 3],
+            samples[idx - channel_count * 4],
+        }) >> @intCast(coefficient_shift_right);
+        samples[idx] = @intCast(r + residuals[4 * ((block_size - order) / 4) + i]);
+    }
+}
+
+inline fn linear_predictor_8(comptime SampleType: type, comptime InterType: type, block_size: u16, channel_count: u16, coefficient_shift_right: u6, predictor_coefficient: [8]SampleType, samples: []SampleType, residuals: []const InterType) void {
+    const order = 8;
+    var rolling_vector = @Vector(order, InterType){
+        samples[channel_count * order - channel_count * 1],
+        samples[channel_count * order - channel_count * 2],
+        samples[channel_count * order - channel_count * 3],
+        samples[channel_count * order - channel_count * 4],
+        samples[channel_count * order - channel_count * 5],
+        samples[channel_count * order - channel_count * 6],
+        samples[channel_count * order - channel_count * 7],
+        samples[channel_count * order - channel_count * 8],
+    };
+    const factors = [order]@Vector(order, InterType){
+        .{ predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7] },
+        .{ predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0] },
+        .{ predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1] },
+        .{ predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2] },
+        .{ predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3] },
+        .{ predictor_coefficient[5], predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4] },
+        .{ predictor_coefficient[6], predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5] },
+        .{ predictor_coefficient[7], predictor_coefficient[0], predictor_coefficient[1], predictor_coefficient[2], predictor_coefficient[3], predictor_coefficient[4], predictor_coefficient[5], predictor_coefficient[6] },
+    };
+    for (0..(block_size - order) / order) |j| {
+        // const v_residuals = [order]@Vector(order, InterType){
+        //     .{ 0, 0, 0, 0, 0, 0, 0, residuals[order * j + 0] },
+        //     .{ 0, 0, 0, 0, 0, 0, residuals[order * j + 1], 0 },
+        //     .{ 0, 0, 0, 0, 0, residuals[order * j + 2], 0, 0 },
+        //     .{ 0, 0, 0, 0, residuals[order * j + 3], 0, 0, 0 },
+        //     .{ 0, 0, 0, residuals[order * j + 4], 0, 0, 0, 0 },
+        //     .{ 0, 0, residuals[order * j + 5], 0, 0, 0, 0, 0 },
+        //     .{ 0, residuals[order * j + 6], 0, 0, 0, 0, 0, 0 },
+        //     .{ residuals[order * j + 7], 0, 0, 0, 0, 0, 0, 0 },
+        // };
+        inline for (0..order) |i| {
+            rolling_vector[order - 1 - (i % order)] = @reduce(.Add, factors[i] * rolling_vector) >> @intCast(coefficient_shift_right);
+            // rolling_vector += v_residuals[i];
+            rolling_vector[order - 1 - (i % order)] += residuals[order * j + i];
+            const idx = channel_count * (order + order * j + i);
+            samples[idx] = @intCast(rolling_vector[order - 1 - (i % order)]);
+        }
+    }
+    for (0..(block_size - order) % order) |i| {
+        const idx = channel_count * (order + order * ((block_size - order) / order) + i);
+        const r = @reduce(.Add, factors[0] * @Vector(order, InterType){
+            samples[idx - channel_count * 1],
+            samples[idx - channel_count * 2],
+            samples[idx - channel_count * 3],
+            samples[idx - channel_count * 4],
+            samples[idx - channel_count * 5],
+            samples[idx - channel_count * 6],
+            samples[idx - channel_count * 7],
+            samples[idx - channel_count * 8],
+        }) >> @intCast(coefficient_shift_right);
+        samples[idx] = @intCast(r + residuals[order * ((block_size - order) / order) + i]);
+    }
+}
+
+inline fn linear_predictor(comptime SampleType: type, comptime InterType: type, comptime order: u6, block_size: u16, channel_count: u16, coefficient_shift_right: u6, predictor_coefficient: []const SampleType, samples: []SampleType, residuals: []const InterType) void {
+    if (order == 4) return linear_predictor_4(SampleType, InterType, block_size, channel_count, coefficient_shift_right, predictor_coefficient[0..4].*, samples, residuals);
+    if (order == 8) return linear_predictor_8(SampleType, InterType, block_size, channel_count, coefficient_shift_right, predictor_coefficient[0..8].*, samples, residuals);
+    for (0..block_size - order) |i| {
+        const idx = channel_count * (order + i);
+        var predicted_without_shift: InterType = 0;
+        for (0..order) |o| {
+            predicted_without_shift += @as(InterType, @intCast(samples[idx - channel_count * (1 + o)])) * predictor_coefficient[o];
+        }
+        const predicted = predicted_without_shift >> @intCast(coefficient_shift_right);
+        samples[idx] = @intCast(predicted + residuals[i]);
+    }
+}
+
 fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream_info: StreaminfoMetadata, reader: anytype) !DecodedFLAC {
     // Larger type for intermediate computations
     const InterType = switch (SampleType) {
@@ -574,16 +701,9 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     const residuals = try decode_residuals(InterType, allocator, block_size, order, &bit_reader);
                     defer allocator.free(residuals);
 
-                    for (0..block_size - order) |i| {
-                        const idx = frame_sample_offset + channel_count * (order + i) + channel;
-                        samples[idx] = @intCast(switch (order) {
-                            0 => residuals[i],
-                            1 => residuals[i] + @as(InterType, 1) * samples[idx - channel_count * 1],
-                            2 => residuals[i] + @as(InterType, 2) * samples[idx - channel_count * 1] - @as(InterType, 1) * samples[idx - channel_count * 2],
-                            3 => residuals[i] + @as(InterType, 3) * samples[idx - channel_count * 1] - @as(InterType, 3) * samples[idx - channel_count * 2] + @as(InterType, 1) * samples[idx - channel_count * 3],
-                            4 => residuals[i] + @as(InterType, 4) * samples[idx - channel_count * 1] - @as(InterType, 6) * samples[idx - channel_count * 2] + @as(InterType, 4) * samples[idx - channel_count * 3] - samples[idx - channel_count * 4],
-                            else => unreachable,
-                        });
+                    switch (order) {
+                        5...7 => unreachable,
+                        inline else => |comptime_order| fixed_predictor(SampleType, InterType, comptime_order, block_size, channel_count, samples[frame_sample_offset + channel ..], residuals),
                     }
                 },
                 0b100000...0b111111 => |t| { // Subframe with a linear predictor of order v-31; i.e., 1 through 32 (inclusive)
@@ -611,14 +731,11 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     const residuals = try decode_residuals(InterType, allocator, block_size, order, &bit_reader);
                     defer allocator.free(residuals);
 
-                    for (0..block_size - order) |i| {
-                        const idx = frame_sample_offset + channel_count * (order + i) + channel;
-                        var predicted_without_shift: InterType = 0;
-                        for (0..order) |o| {
-                            predicted_without_shift += @as(InterType, @intCast(samples[idx - channel_count * (1 + o)])) * predictor_coefficient[o];
-                        }
-                        const predicted = predicted_without_shift >> @intCast(coefficient_shift_right);
-                        samples[idx] = @intCast(predicted + residuals[i]);
+                    switch (order) {
+                        33...63 => unreachable,
+                        inline else => |comptime_order| {
+                            linear_predictor(SampleType, InterType, comptime_order, block_size, channel_count, coefficient_shift_right, predictor_coefficient[0..order], samples[frame_sample_offset + channel ..], residuals);
+                        },
                     }
                 },
                 0b000010...0b000111, 0b001101...0b011111 => return error.InvalidSubframeHeader, // Reserved
