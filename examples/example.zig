@@ -46,7 +46,7 @@ const PlayState = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const r = try decode_standard_test(allocator, "37 - 20 bit per sample");
+    const r = try decode_standard_test(allocator, "01 - blocksize 4096");
     defer r.deinit(allocator);
 
     zaudio.init(allocator);

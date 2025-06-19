@@ -148,14 +148,14 @@ const BitDepth = enum(u3) {
     }
 };
 
-const FrameHeader = struct {
-    frame_sync: u15,
-    blocking_strategy: enum(u1) { Fixed = 0, Variable = 1 },
-    block_size: u4,
-    sample_rate: SampleRate,
-    channels: Channels,
-    bit_depth: BitDepth,
+const FrameHeader = packed struct(u32) {
     zero: u1,
+    bit_depth: BitDepth,
+    channels: Channels,
+    sample_rate: SampleRate,
+    block_size: u4,
+    blocking_strategy: enum(u1) { Fixed = 0, Variable = 1 },
+    frame_sync: u15,
 };
 
 const SubframeHeader = packed struct {
@@ -446,21 +446,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     var frame_sample_offset: usize = 0;
     // TODO: Get two bytes and check for FrameSync (0xFFF8 or 0xFFF9), rather than relying on knowing the number of samples in advance?
     while (frame_sample_offset < samples.len) {
-        var frame_header: FrameHeader = undefined;
-        var bit_reader = std.io.bitReader(.big, reader);
-        // log_frame.debug("(reader offset: {d})", .{try reader.context.getPos()});
-        frame_header.frame_sync = try bit_reader.readBitsNoEof(u15, 15);
+        const frame_header: FrameHeader = @bitCast(try reader.readInt(u32, .big));
+        log_frame.debug("frame header: {any} (frame_sample_offset: {d})", .{ frame_header, frame_sample_offset });
         if (frame_header.frame_sync != (0xFFF8 >> 1))
             return error.InvalidFrameHeader;
-        frame_header.blocking_strategy = @enumFromInt(try bit_reader.readBitsNoEof(u1, 1));
-        frame_header.block_size = try bit_reader.readBitsNoEof(u4, 4);
-        frame_header.sample_rate = @enumFromInt(try bit_reader.readBitsNoEof(u4, 4));
-        frame_header.channels = @enumFromInt(try bit_reader.readBitsNoEof(u4, 4));
-        frame_header.bit_depth = @enumFromInt(try bit_reader.readBitsNoEof(u3, 3));
-        frame_header.zero = try bit_reader.readBitsNoEof(u1, 1);
-        if (frame_header.zero != 0)
-            return error.InvalidFrameHeader;
-        log_frame.debug("frame header: {any} (frame_sample_offset: {d})", .{ frame_header, frame_sample_offset });
+
+        var bit_reader = std.io.bitReader(.big, reader);
 
         const coded_number = try read_coded_number(&bit_reader);
         switch (frame_header.blocking_strategy) {
