@@ -173,29 +173,17 @@ const SubframeHeader = packed struct {
 
 /// Reads a signed integer with a runtime known bit depth
 inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
-    if (bit_depth == 0) return 0;
-    const container_type = switch (@bitSizeOf(T)) {
-        8 => u8,
-        16 => u16,
-        32 => u32,
-        64 => u64,
-        else => @compileError("Unsupported container type: " ++ @typeName(T)),
-    };
-
+    std.debug.assert(bit_depth > 0 and bit_depth <= @bitSizeOf(T));
+    const container_type = std.meta.Int(.unsigned, @bitSizeOf(T));
     var r = try bit_reader.readBitsNoEof(container_type, bit_depth);
     // Sign extend from bit_depth to container_type size
-    if ((@as(container_type, 1) << @intCast(bit_depth - 1)) & r != 0) r |= @as(container_type, @truncate(0xFFFFFFFFFFFFFFFF)) << @intCast(bit_depth);
-    return @bitCast(r);
+    const shift = @bitSizeOf(container_type) - @as(usize, bit_depth);
+    r <<= @intCast(shift);
+    return @as(T, @bitCast(r)) >> @intCast(shift);
 }
 
 inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: anytype, wasted_bits: u6, bits_per_sample: u6) !SampleType {
-    const InterType = switch (SampleType) {
-        i8 => i16,
-        i16 => i32,
-        i24 => i32,
-        i32 => i64,
-        else => @compileError("Unsupported sample type: " ++ @typeName(SampleType)),
-    };
+    const InterType = std.meta.Int(.signed, try std.math.ceilPowerOfTwo(u32, @bitSizeOf(SampleType) + 1));
     return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample - wasted_bits));
 }
 
