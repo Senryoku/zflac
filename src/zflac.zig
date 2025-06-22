@@ -174,10 +174,10 @@ const SubframeHeader = packed struct {
 /// Reads a signed integer with a runtime known bit depth
 inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
     std.debug.assert(bit_depth > 0 and bit_depth <= @bitSizeOf(T));
-    const container_type = std.meta.Int(.unsigned, @bitSizeOf(T));
-    var r = try bit_reader.readBitsNoEof(container_type, bit_depth);
+    const ContainerType = std.meta.Int(.unsigned, @bitSizeOf(T));
+    var r = try bit_reader.readBitsNoEof(ContainerType, bit_depth);
     // Sign extend from bit_depth to container_type size
-    const shift = @bitSizeOf(container_type) - @as(usize, bit_depth);
+    const shift = @bitSizeOf(ContainerType) - @as(usize, bit_depth);
     r <<= @intCast(shift);
     return @as(T, @bitCast(r)) >> @intCast(shift);
 }
@@ -200,32 +200,43 @@ fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, bloc
     for (0..std.math.pow(u32, 2, partition_order)) |partition| {
         var count = (block_size >> partition_order);
         if (partition == 0) count -= order;
-        const rice_parameter: u5 = try bit_reader.readBitsNoEof(u5, switch (coding_method) {
-            0b00 => 4,
-            0b01 => 5,
+        switch (coding_method) {
+            inline 0b00, 0b01 => |comptime_coding_method| try extract_residuals(ResidualType, @enumFromInt(comptime_coding_method), residuals[partition_start_idx..][0..count], bit_reader),
             else => unreachable,
-        });
-        log_residual.debug("      partition[{d}]: rice_parameter: {d}", .{ partition, rice_parameter });
-        if ((coding_method == 0b00 and rice_parameter == 0b1111) or (coding_method == 0b01 and rice_parameter == 0b11111)) {
+        }
+        partition_start_idx += count;
+    }
+}
+
+fn extract_residuals(comptime ResidualType: type, comptime coding_method: enum(u2) { Rice = 0, Rice2 = 1 }, residuals: []ResidualType, bit_reader: anytype) !void {
+    const RiceParameterType = switch (coding_method) {
+        .Rice => u4,
+        .Rice2 => u5,
+    };
+    const rice_parameter = try bit_reader.readBitsNoEof(RiceParameterType, @bitSizeOf(RiceParameterType));
+    log_residual.debug("      partition[]: rice_parameter: {d}", .{rice_parameter});
+    const UnsignedResidualType = std.meta.Int(.unsigned, @bitSizeOf(ResidualType));
+    switch (rice_parameter) {
+        std.math.maxInt(RiceParameterType) => {
             // No rice parameter
             const bit_depth: u5 = try bit_reader.readBitsNoEof(u5, 5);
             if (bit_depth == 0) {
-                @memset(residuals[partition_start_idx..][0..count], 0);
+                @memset(residuals, 0);
             } else {
-                for (0..count) |i|
-                    residuals[partition_start_idx + i] = try read_signed_integer(ResidualType, bit_reader, bit_depth);
+                for (0..residuals.len) |i|
+                    residuals[i] = try read_signed_integer(ResidualType, bit_reader, bit_depth);
             }
-        } else {
-            const UnsignedResidualType = std.meta.Int(.unsigned, @bitSizeOf(ResidualType));
-            for (0..count) |i| {
+        },
+        inline else => |comptime_rice_parameter| {
+            if (comptime_rice_parameter >= @bitSizeOf(UnsignedResidualType)) unreachable;
+            for (0..residuals.len) |i| {
                 const quotient: UnsignedResidualType = @intCast(try bit_reader.readUnary());
-                const remainder = try bit_reader.readBitsNoEof(UnsignedResidualType, rice_parameter);
-                const zigzag_encoded: UnsignedResidualType = (quotient << @intCast(rice_parameter)) + remainder;
+                const remainder = try bit_reader.readBitsNoEof(UnsignedResidualType, comptime_rice_parameter);
+                const zigzag_encoded: UnsignedResidualType = (quotient << @intCast(comptime_rice_parameter)) + remainder;
                 const residual: ResidualType = @bitCast((zigzag_encoded >> 1) ^ @as(UnsignedResidualType, @bitCast(-@as(ResidualType, @intCast(zigzag_encoded & 1)))));
-                residuals[partition_start_idx + i] = residual;
+                residuals[i] = residual;
             }
-        }
-        partition_start_idx += count;
+        },
     }
 }
 
