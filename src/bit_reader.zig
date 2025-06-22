@@ -22,28 +22,41 @@ pub fn BitReader(comptime Reader: type) type {
             0b11111111,
         };
 
-        pub inline fn readBitsNoEof(self: *@This(), comptime T: type, num: u16) !T {
+        pub inline fn readBitsNoEof(self: *@This(), comptime T: type, num: u32) !T {
             std.debug.assert(self.count <= 8);
-            const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
-            const U = if (@bitSizeOf(T) < 8) u8 else UT;
+            std.debug.assert(num <= @bitSizeOf(T));
+
+            const U = if (@bitSizeOf(T) < 8) u8 else std.meta.Int(.unsigned, @bitSizeOf(T));
 
             if (num <= self.count) return @intCast(self.removeBits(@intCast(num)));
 
-            const bits_from_buffer: u4 = self.count;
-            const full_bytes_left = (num - bits_from_buffer) / 8;
-
+            var bits_left: u32 = num - self.count;
+            std.debug.assert(bits_left > 0 and bits_left <= @bitSizeOf(T));
             var out: U = self.flush();
 
-            for (0..full_bytes_left) |_| {
-                const byte = try self.reader.readByte();
-                std.debug.assert(U != u8);
-                if (U != u8) out <<= 8;
-                out |= byte;
+            if (bits_left >= 8) {
+                if (U == u8) {
+                    // Only possible case: num == 8 on an empty buffer
+                    std.debug.assert(num == 8);
+                    std.debug.assert(bits_left == 8);
+                    std.debug.assert(self.bits == 0);
+                    std.debug.assert(self.count == 0);
+                    return @intCast(try self.reader.readByte());
+                } else {
+                    const full_bytes_left = bits_left / 8;
+                    std.debug.assert(full_bytes_left <= @sizeOf(T));
+
+                    for (0..full_bytes_left) |_| {
+                        out <<= 8;
+                        out |= try self.reader.readByte();
+                    }
+
+                    bits_left %= 8;
+                }
             }
-
-            const bits_left = num - bits_from_buffer - 8 * full_bytes_left;
-
             if (bits_left == 0) return @intCast(out);
+
+            std.debug.assert(bits_left > 0 and bits_left < 8);
 
             const final_byte = try self.reader.readByte();
             const keep = 8 - bits_left;
