@@ -256,11 +256,7 @@ inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: anytype, 
         i32 => i64,
         else => @compileError("Unsupported sample type: " ++ @typeName(SampleType)),
     };
-    if (wasted_bits > 0) {
-        return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample - wasted_bits));
-    } else {
-        return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample));
-    }
+    return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample - wasted_bits));
 }
 
 fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: anytype) !void {
