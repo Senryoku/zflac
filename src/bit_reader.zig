@@ -94,35 +94,30 @@ pub fn BitReader(comptime Reader: type) type {
         };
 
         pub inline fn readUnary(self: *@This()) !u32 {
-            if (self.count == 0) return try self.readUnaryFromEmptyBuffer();
+            // Also accounts for the self.count == 0 case.
+            if (self.bits == 0) return self.count + try self.readUnaryFromEmptyBuffer();
             std.debug.assert(self.count > 0 and self.count <= 8);
-            const buffered_bits = (self.bits << @intCast(8 - self.count)) | unary_end_markers[self.count];
-            const clz = @clz(buffered_bits);
-            if (clz == self.count) {
-                return clz + try self.readUnaryFromEmptyBuffer();
-            } else {
-                // Discard those bits and the 1
-                self.count = self.count - 1 - clz;
-                self.bits &= low_bit_mask[self.count];
-                return clz;
-            }
+            const clz = @clz(self.bits) - (8 - self.count);
+            std.debug.assert(clz < 8);
+            // Discard those bits and the 1
+            self.count = self.count - 1 - clz;
+            self.bits &= low_bit_mask[self.count];
+            return clz;
         }
 
         inline fn readUnaryFromEmptyBuffer(self: *@This()) !u32 {
             var unary_integer: u32 = 0;
-            while (true) {
-                const bits = try self.reader.readByte();
-                if (bits == 0) { // <=> clz == 8
-                    unary_integer += 8;
-                } else {
-                    const clz = @clz(bits);
-                    std.debug.assert(clz < 8);
-                    // Discard those bits and the 1
-                    self.count = 8 - 1 - clz;
-                    self.bits = bits & low_bit_mask[self.count];
-                    return unary_integer + clz;
-                }
+            var bits = try self.reader.readByte();
+            while (bits == 0) { // <=> clz == 8
+                unary_integer += 8;
+                bits = try self.reader.readByte();
             }
+            const clz = @clz(bits);
+            std.debug.assert(clz < 8);
+            // Discard those bits and the 1
+            self.count = 8 - 1 - clz;
+            self.bits = bits & low_bit_mask[self.count];
+            return unary_integer + clz;
         }
     };
 }
