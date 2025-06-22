@@ -14,8 +14,8 @@
             .lazy = true,
         },
         .zflac = .{
-            .url = "git+https://github.com/Senryoku/zflac#0fa646a2f5766db650e53f10a516de3e1dd7efd5",
-            .hash = "zflac-0.0.0-NYSmhRevAABf4-VhoyyCluVUh2p767Pbxghfj9VzsUdJ",
+            .url = "git+https://github.com/Senryoku/zflac#53041d695bc2488187aa64b6bc52148900c3bd8e",
+            .hash = "zflac-0.0.0-NYSmhUGuAAAVgFae0dbQw1vJU1tR_DblHFvrzZipJswf",
         },
     },
     .paths = .{
