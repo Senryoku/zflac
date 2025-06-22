@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const BitReader = @import("bit_reader.zig");
 
 const log = std.log.scoped(.zflac);
 const log_frame = std.log.scoped(.zflac_frame);
@@ -170,67 +171,6 @@ const SubframeHeader = packed struct {
     wasted_bit_flag: u1,
 };
 
-const low_bit_mask = [_]u8{
-    0b00000000,
-    0b00000001,
-    0b00000011,
-    0b00000111,
-    0b00001111,
-    0b00011111,
-    0b00111111,
-    0b01111111,
-    // 0b11111111,
-};
-
-inline fn read_unary_integer_from_empty_buffer(bit_reader: anytype) !u32 {
-    std.debug.assert(bit_reader.count == 0);
-    if (try bit_reader.readBitsNoEof(u1, 1) == 0) { // Force fetching the next byte
-        std.debug.assert(bit_reader.count == 7);
-        var unary_integer: u32 = 1;
-        const buffered_bits = (bit_reader.bits << @intCast(8 - bit_reader.count)) | low_bit_mask[8 - bit_reader.count];
-        const clz = @clz(buffered_bits);
-        unary_integer += clz;
-        if (clz == bit_reader.count) {
-            bit_reader.alignToByte(); // Discard those 0 bits
-            while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1; // Revert to simple version
-        } else {
-            _ = try bit_reader.readBitsNoEof(u8, clz + 1); // Discard those bits and the 1
-        }
-        return unary_integer;
-    }
-    return 0;
-}
-
-inline fn read_unary_integer(bit_reader: anytype) !u32 {
-    if (false) {
-        // Easy to read and portable version.
-        var unary_integer: u32 = 0;
-        while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
-        return unary_integer;
-    } else {
-        // WIP: Faster version relying on the internals of std.io.bitReader
-        if (bit_reader.count == 0)
-            return try read_unary_integer_from_empty_buffer(bit_reader);
-        const buffered_bits = (bit_reader.bits << @intCast(8 - bit_reader.count)) | low_bit_mask[8 - bit_reader.count];
-        const clz = @clz(buffered_bits);
-        var unary_integer: u32 = clz;
-        if (clz == bit_reader.count) {
-            bit_reader.alignToByte(); // Discard those 0 bits
-            if (false) {
-                // Revert to simple version immediately
-                while (try bit_reader.readBitsNoEof(u1, 1) == 0) unary_integer += 1;
-            } else {
-                // Inline a second round before reverting (NOTE: a recursive call would prevent inlining and seems to be slower)
-                unary_integer += try read_unary_integer_from_empty_buffer(bit_reader);
-            }
-            return unary_integer;
-        } else {
-            _ = try bit_reader.readBitsNoEof(u8, clz + 1); // Discard those bits and the 1
-            return unary_integer;
-        }
-    }
-}
-
 /// Reads a signed integer with a runtime known bit depth
 inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
     if (bit_depth == 0) return 0;
@@ -290,7 +230,7 @@ fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, bloc
         } else {
             const UnsignedResidualType = std.meta.Int(.unsigned, @bitSizeOf(ResidualType));
             for (0..count) |i| {
-                const quotient: UnsignedResidualType = @intCast(try read_unary_integer(bit_reader));
+                const quotient: UnsignedResidualType = @intCast(try bit_reader.readUnary());
                 const remainder = try bit_reader.readBitsNoEof(UnsignedResidualType, rice_parameter);
                 const zigzag_encoded: UnsignedResidualType = (quotient << @intCast(rice_parameter)) + remainder;
                 const residual: ResidualType = @bitCast((zigzag_encoded >> 1) ^ @as(UnsignedResidualType, @bitCast(-@as(ResidualType, @intCast(zigzag_encoded & 1)))));
@@ -314,7 +254,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
 
         switch (header.info) {
             .Streaminfo => {
-                var bit_reader = std.io.bitReader(.big, reader);
+                var bit_reader = BitReader.init(reader);
                 stream_info = .{
                     .min_block_size = try bit_reader.readBitsNoEof(u16, 16),
                     .max_block_size = try bit_reader.readBitsNoEof(u16, 16),
@@ -453,7 +393,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             .Variable => log_frame.debug("  Sample number: {d}", .{coded_number}),
         }
 
-        var bit_reader = std.io.bitReader(.big, reader);
+        var bit_reader = BitReader.init(reader);
 
         const block_size: u16 = switch (frame_header.block_size) {
             0b0000 => return error.InvalidFrameHeader, // Reserved
@@ -529,7 +469,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
             var wasted_bits: u6 = 0;
             if (subframe_header.wasted_bit_flag == 1) {
-                wasted_bits = @intCast(try read_unary_integer(&bit_reader) + 1);
+                wasted_bits = @intCast(try bit_reader.readUnary() + 1);
                 log_subframe.debug("  wasted_bits: {d}", .{wasted_bits});
             }
 
