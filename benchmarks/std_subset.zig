@@ -102,7 +102,7 @@ pub fn main() !void {
         "42 - 7 channels (6.1)",
         "43 - 8 channels (7.1)",
         "44 - 8-channel surround, 192kHz, 24 bit, using only 32nd order predictors",
-        // "45 - no total number of samples set",
+        "45 - no total number of samples set",
         "46 - no min-max framesize set",
         "47 - only STREAMINFO",
         "48 - Extremely large SEEKTABLE",

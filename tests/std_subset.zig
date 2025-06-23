@@ -213,8 +213,7 @@ test "44 - 8-channel surround, 192kHz, 24 bit, using only 32nd order predictors"
 }
 
 test "45 - no total number of samples set" {
-    // NOTE: This is a valid FLAC file, but fringe AFAIK, and currently unsupported.
-    try std.testing.expectError(error.UnknownNumberOfSamples, run_standard_test("45 - no total number of samples set"));
+    try run_standard_test("45 - no total number of samples set");
 }
 
 test "46 - no min-max framesize set" {

@@ -360,17 +360,17 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         else => @compileError("Unsupported sample type: " ++ @typeName(SampleType)),
     };
 
-    if (stream_info.number_of_samples == 0) return error.UnknownNumberOfSamples; // This is valid, but unsupported for now.
-
     var first_frame = true;
     var sample_rate: u24 = undefined;
     var channel_count: u4 = undefined;
     var bit_depth: BitDepth = undefined;
     var bits_per_sample: u6 = undefined;
 
+    var valid_total_sample_count = stream_info.number_of_samples > 0;
+
     const expected_channel_count = @as(usize, stream_info.channel_count) + 1;
-    const total_sample_count = expected_channel_count * stream_info.number_of_samples;
-    const samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
+    const total_sample_count = expected_channel_count * (if (valid_total_sample_count) stream_info.number_of_samples else 4096);
+    var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
     errdefer allocator.free(samples_backing);
 
     var samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
@@ -382,12 +382,20 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     defer allocator.free(samples_working_buffer);
 
     var frame_sample_offset: usize = 0;
-    // TODO: Get two bytes and check for FrameSync (0xFFF8 or 0xFFF9), rather than relying on knowing the number of samples in advance?
-    while (frame_sample_offset < samples.len) {
-        const frame_header: FrameHeader = @bitCast(try reader.readInt(u32, .big));
+    while (true) {
+        if (valid_total_sample_count and frame_sample_offset >= total_sample_count) break;
+
+        const frame_header: FrameHeader = @bitCast(reader.readInt(u32, .big) catch |err| {
+            if (valid_total_sample_count) return err; // Unexpected EOF, based on the expected number of samples from the metadata.
+            // Unknown number of samples: EndOfStream on frame boundary isn't necessarily an error.
+            switch (err) {
+                error.EndOfStream => break,
+                else => |e| return e,
+            }
+        });
         log_frame.debug("frame header: {any} (frame_sample_offset: {d})", .{ frame_header, frame_sample_offset });
         if (frame_header.frame_sync != (0xFFF8 >> 1))
-            return error.InvalidFrameHeader;
+            return error.InvalidFrameHeader; // NOTE: We could try to return normally when valid_total_sample_count is false here. The CRC check should catch if this was the wrong decision.
 
         const coded_number = try read_coded_number(&reader);
         switch (frame_header.blocking_strategy) {
@@ -438,15 +446,16 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         } else {
             // "Because not all environments in which FLAC decoders are used are able to cope with changes to these properties during playback, a decoder MAY choose to stop decoding on such a change."
             if (sample_rate != frame_sample_rate or channel_count != frame_header.channels.count() or bit_depth != frame_header.bit_depth) return error.InconsistentParameters;
+        }
 
-            const expected_samples = frame_sample_offset + @as(usize, block_size) * channel_count;
-            if (samples.len < expected_samples) {
-                return error.InvalidSampleCount;
-                // We could support reallocating the backing buffer (when the total number of samples is unknown, for streaming I guess):
-                //   samples_backing = try allocator.realloc(samples_backing, expected_samples);
-                //   samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
-                // However, we currently rely on the total number of samples to stop processing.
-            }
+        const expected_samples = frame_sample_offset + @as(usize, block_size) * channel_count;
+        if (samples.len < expected_samples) {
+            // Since this should only happen when the number of samples is unknown, or wrong, increase it more than strictly necessary since we'd have to at each new frame otherwise.
+            // The buffer will be trimmed to the correct size once the file has been fully processed.
+            const new_size = @max(2 * samples.len, expected_samples);
+            samples_backing = try allocator.realloc(samples_backing, new_size * @sizeOf(SampleType));
+            samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+            valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
         // Block size of 1 not allowed except for the last frame.
@@ -506,13 +515,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
                     if (samples_working_buffer.len < block_size)
                         samples_working_buffer = try allocator.realloc(samples_working_buffer, block_size);
+                    if (residuals.len < block_size)
+                        residuals = try allocator.realloc(residuals, block_size);
+
                     for (0..order) |i| {
                         samples_working_buffer[i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
                         log_subframe.debug("    warmup_sample: {d}", .{samples_working_buffer[i]});
                     }
-
-                    if (residuals.len < block_size)
-                        residuals = try allocator.realloc(residuals, block_size);
 
                     try decode_residuals(InterType, residuals, block_size, order, &bit_reader);
 
@@ -557,8 +566,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 0b100000...0b111111 => |t| { // Subframe with a linear predictor of order v-31; i.e., 1 through 32 (inclusive)
                     const order: u6 = @intCast(t - 31);
                     log_subframe.debug("  Subframe with a linear predictor of order: {d}", .{order});
+
                     if (samples_working_buffer.len < block_size)
                         samples_working_buffer = try allocator.realloc(samples_working_buffer, block_size);
+                    if (residuals.len < block_size)
+                        residuals = try allocator.realloc(residuals, block_size);
+
                     // Unencoded warm-up samples (n = subframe's bits per sample * LPC order).
                     for (0..order) |i| {
                         samples_working_buffer[i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
@@ -578,9 +591,6 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         predictor_coefficient[order - 1 - i] = try read_unencoded_sample(InterType, &bit_reader, 0, coefficient_precision);
                         log_subframe.debug("    predictor_coefficient[{d}]: {d}", .{ i, predictor_coefficient[order - 1 - i] });
                     }
-
-                    if (residuals.len < block_size)
-                        residuals = try allocator.realloc(residuals, block_size);
 
                     try decode_residuals(InterType, residuals, block_size, order, &bit_reader);
 
@@ -656,6 +666,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         }
 
         frame_sample_offset += @as(usize, @intCast(channel_count)) * block_size;
+    }
+
+    if (samples.len != frame_sample_offset) {
+        // This should only be possible when the number of samples is unknown (absent from the metadata), or wrong.
+        std.debug.assert(!valid_total_sample_count);
+        samples_backing = try allocator.realloc(samples_backing, frame_sample_offset * @sizeOf(SampleType));
+        samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
     }
 
     return .{

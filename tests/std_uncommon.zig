@@ -14,28 +14,20 @@ fn run_uncommon_test(comptime filename: []const u8) !void {
     defer r.deinit(allocator);
 }
 
-// NOTE: Multiple of these are supposed to return an error be cause I chose not to support all these features,
-//       however they're not failling for the expected reason: An unknown number of samples shouldn't be an error
-//       as far as the standard is concerned.
-
 test "01 - changing samplerate" {
-    try std.testing.expectError(error.UnknownNumberOfSamples, run_uncommon_test("01 - changing samplerate"));
-    // try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("01 - changing samplerate"));
+    try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("01 - changing samplerate"));
 }
 
 test "02 - increasing number of channels" {
-    try std.testing.expectError(error.UnknownNumberOfSamples, run_uncommon_test("02 - increasing number of channels"));
-    // try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("02 - increasing number of channels"));
+    try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("02 - increasing number of channels"));
 }
 
 test "03 - decreasing number of channels" {
-    try std.testing.expectError(error.UnknownNumberOfSamples, run_uncommon_test("03 - decreasing number of channels"));
-    // try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("03 - decreasing number of channels"));
+    try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("03 - decreasing number of channels"));
 }
 
 test "04 - changing bitdepth" {
-    try std.testing.expectError(error.UnknownNumberOfSamples, run_uncommon_test("04 - changing bitdepth"));
-    // try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("04 - changing bitdepth"));
+    try std.testing.expectError(error.InconsistentParameters, run_uncommon_test("04 - changing bitdepth"));
 }
 
 test "05 - 32bps audio" {

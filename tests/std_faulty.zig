@@ -33,7 +33,7 @@ test "04 - wrong number of channels" {
 }
 
 test "05 - wrong total number of samples" {
-    try std.testing.expectError(error.InvalidSampleCount, run_faulty_test("05 - wrong total number of samples"));
+    try run_faulty_test("05 - wrong total number of samples");
 }
 
 test "06 - missing streaminfo metadata block" {
