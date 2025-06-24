@@ -10,9 +10,9 @@ const log_residual = std.log.scoped(.zflac_residual);
 const Signature: u32 = 0x664C6143;
 
 const Samples = union(enum) {
-    s8: []align(16) i8,
-    s16: []align(16) i16,
-    s32: []align(16) i32,
+    s8: []align(32) i8,
+    s16: []align(32) i16,
+    s32: []align(32) i32,
 };
 
 pub const DecodedFLAC = struct {
@@ -20,7 +20,7 @@ pub const DecodedFLAC = struct {
     sample_rate: u24,
     bits_per_sample: u8,
     samples: Samples,
-    _samples_backing: []align(16) u8,
+    _samples_backing: []align(32) u8,
 
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         allocator.free(self._samples_backing);
@@ -328,12 +328,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
     const expected_channel_count = @as(usize, stream_info.channel_count) + 1;
     const total_sample_count = expected_channel_count * (if (valid_total_sample_count) stream_info.number_of_samples else 4096);
-    var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
+    var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 32, null);
     errdefer allocator.free(samples_backing);
 
-    var samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+    var samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
-    var samples_working_buffer = try allocator.alloc(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096);
+    var samples_working_buffer = try allocator.allocWithOptions(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096, 32, null);
     defer allocator.free(samples_working_buffer);
 
     var frame_sample_offset: usize = 0;
@@ -397,7 +397,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             // The buffer will be trimmed to the correct size once the file has been fully processed.
             const new_size = @max(2 * samples.len, expected_samples);
             samples_backing = try allocator.realloc(samples_backing, new_size * @sizeOf(SampleType));
-            samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+            samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
             valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
@@ -500,7 +500,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     // Prediction right shift needed in bits.
                     const prediction_shift_right = try bit_reader.readBitsNoEof(u5, 5);
                     // Predictor coefficients (n = predictor coefficient precision * LPC order).
-                    var predictor_coefficient: [32]InterType = @splat(0);
+                    var predictor_coefficient: [32]InterType align(32) = @splat(0);
                     for (0..order) |i| // Stored in reverse order to match the layout of samples in memory (samples_working_buffer).
                         predictor_coefficient[order - 1 - i] = try read_unencoded_sample(InterType, &bit_reader, 0, coefficient_precision);
 
@@ -513,14 +513,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     switch (order) {
                         0 => {}, // Just the residuals
                         33...63 => unreachable,
-                        inline 8, 16, 24, 32 => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
                         inline else => |comptime_order| {
                             for (comptime_order..block_size) |i| {
-                                var predicted_without_shift: InterType = 0;
-                                for (0..comptime_order) |o|
-                                    predicted_without_shift += @as(InterType, @intCast(samples_working_buffer[i - comptime_order + o])) * predictor_coefficient[o];
-                                const predicted = predicted_without_shift >> @intCast(prediction_shift_right);
-                                samples_working_buffer[i] += predicted;
+                                var prediction: InterType = 0;
+                                inline for (0..comptime_order) |o|
+                                    prediction += samples_working_buffer[i - comptime_order + o] * predictor_coefficient[o];
+                                samples_working_buffer[i] += prediction >> @intCast(prediction_shift_right);
                             }
                         },
                     }
@@ -578,7 +576,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // This should only be possible when the number of samples is unknown (absent from the metadata), or wrong.
         std.debug.assert(!valid_total_sample_count);
         samples_backing = try allocator.realloc(samples_backing, frame_sample_offset * @sizeOf(SampleType));
-        samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
+        samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
     }
 
     return .{
@@ -593,17 +591,6 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         }, samples),
         ._samples_backing = samples_backing,
     };
-}
-
-/// samples: order unencoded warmup samples followed by residuals
-inline fn linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
-    const pred_vector: @Vector(order, InterType) = predictor_coefficient[0..order].*;
-    for (0..block_size - order) |i| {
-        const s: @Vector(order, InterType) = samples[i..][0..order].*;
-        const predicted_without_shift = @reduce(.Add, pred_vector * s);
-        const predicted = predicted_without_shift >> @intCast(prediction_shift_right);
-        samples[order + i] += predicted;
-    }
 }
 
 fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: anytype) !void {
