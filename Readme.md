@@ -23,21 +23,21 @@ pub fn main() !void {
 	const allocator = std.heap.page_allocator;
 	const file = try std.fs.cwd().openFile("music.flac", .{});
 	defer file.close();
-
+	
 	// Prefer a buffered reader for performance.
-    var buffered_reader = std.io.bufferedReader(file.reader());
-    const reader = buffered_reader.reader();
-
+	var buffered_reader = std.io.bufferedReader(file.reader());
+	const reader = buffered_reader.reader();
+	
 	const decoded = try zflac.decode(allocator, reader); 
-    defer decoded.deinit(allocator);
-
+	defer decoded.deinit(allocator);
+	
 	// The returned structure holds some basic information on your file:
-    std.debug.print("Channel count: {d}\n", .{decoded.channels});
-    std.debug.print("Sample rate: {d}\n", .{decoded.sample_rate});
+	std.debug.print("Channel count: {d}\n", .{decoded.channels});
+	std.debug.print("Sample rate: {d}\n", .{decoded.sample_rate});
 	// This is the number of significant bits and can be lower than the bit size of samples 
 	// in the final array (e.g. 12bits samples are shifted left by 4 bits to 16bits).
-    std.debug.print("Bits per samples: {d}\n", .{decoded.bits_per_sample}); 
-
+	std.debug.print("Bits per samples: {d}\n", .{decoded.bits_per_sample}); 
+	
 	// `samples` is a tagged union based on the bit depth used in the file.
 	switch (decoded.samples) {
 		.s8 => |samples| play(i8, samples),
