@@ -10,7 +10,7 @@ pub fn BitReader(comptime Reader: type) type {
         bits: u8 = 0,
         count: u4 = 0,
 
-        const low_bit_mask = [9]u8{
+        const LowBitMasks = [9]u8{
             0b00000000,
             0b00000001,
             0b00000011,
@@ -63,21 +63,18 @@ pub fn BitReader(comptime Reader: type) type {
 
             out <<= @intCast(bits_left);
             out |= final_byte >> @intCast(keep);
-            self.bits = final_byte & low_bit_mask[keep];
+            self.bits = final_byte & LowBitMasks[keep];
 
             self.count = @intCast(keep);
             return @intCast(out);
         }
 
         inline fn removeBits(self: *@This(), num: u4) u8 {
-            if (num == 8) {
-                self.count = 0;
-                return self.bits;
-            }
+            if (num == 8) return self.flush();
 
             const keep = self.count - num;
             const bits = self.bits >> @intCast(keep);
-            self.bits &= low_bit_mask[keep];
+            self.bits &= LowBitMasks[keep];
 
             self.count = keep;
             return bits;
@@ -95,17 +92,6 @@ pub fn BitReader(comptime Reader: type) type {
             self.count = 0;
         }
 
-        const unary_end_markers = [8]u8{
-            0b11111111,
-            0b01111111,
-            0b00111111,
-            0b00011111,
-            0b00001111,
-            0b00000111,
-            0b00000011,
-            0b00000001,
-        };
-
         pub inline fn readUnary(self: *@This()) !u32 {
             // Also accounts for the self.count == 0 case.
             if (self.bits == 0) return self.count + try self.readUnaryFromEmptyBuffer();
@@ -114,7 +100,7 @@ pub fn BitReader(comptime Reader: type) type {
             std.debug.assert(clz < 8);
             // Discard those bits and the 1
             self.count = self.count - 1 - clz;
-            self.bits &= low_bit_mask[self.count];
+            self.bits &= LowBitMasks[self.count];
             return clz;
         }
 
@@ -129,7 +115,7 @@ pub fn BitReader(comptime Reader: type) type {
             std.debug.assert(clz < 8);
             // Discard those bits and the 1
             self.count = 8 - 1 - clz;
-            self.bits = bits & low_bit_mask[self.count];
+            self.bits = bits & LowBitMasks[self.count];
             return unary_integer + clz;
         }
     };
