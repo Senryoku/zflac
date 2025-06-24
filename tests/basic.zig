@@ -16,9 +16,9 @@ test "Example 1" {
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(2, r.channels);
-    try std.testing.expectEqual(2, (try r.samples(i16)).len);
-    try std.testing.expectEqual(25588, (try r.samples(i16))[0]);
-    try std.testing.expectEqual(10416, (try r.samples(i16))[1]);
+    try std.testing.expectEqual(2, r.samples.s16.len);
+    try std.testing.expectEqual(25588, r.samples.s16[0]);
+    try std.testing.expectEqual(10416, r.samples.s16[1]);
 }
 
 test "Example 2" {
@@ -49,7 +49,7 @@ test "Example 2" {
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(2, r.channels);
-    try std.testing.expectEqual(2 * (16 + 3), (try r.samples(i16)).len);
+    try std.testing.expectEqual(2 * (16 + 3), r.samples.s16.len);
     try std.testing.expectEqualSlices(i16, &[_]i16{
         10372,                      6070,
         18041,                      10545,
@@ -71,7 +71,7 @@ test "Example 2" {
         @bitCast(@as(u16, 0xc382)), @bitCast(@as(u16, 0b1101110010010000)),
         @bitCast(@as(u16, 0xc40b)), @bitCast(@as(u16, 0b1101110100000010)),
         @bitCast(@as(u16, 0xc14a)), @bitCast(@as(u16, 0b1101101100111110)),
-    }, try r.samples(i16));
+    }, r.samples.s16);
 }
 
 test "Example 3" {
@@ -90,7 +90,6 @@ test "Example 3" {
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(1, r.channels);
-    const samples = try r.samples(i8);
-    try std.testing.expectEqual(24, samples.len);
-    try std.testing.expectEqualSlices(i8, &[_]i8{ 0, 79, 111, 78, 8, -61, -90, -68, -13, 42, 67, 53, 13, -27, -46, -38, -12, 14, 24, 19, 6, -4, -5, 0 }, samples);
+    try std.testing.expectEqual(24, r.samples.s8.len);
+    try std.testing.expectEqualSlices(i8, &[_]i8{ 0, 79, 111, 78, 8, -61, -90, -68, -13, 42, 67, 53, 13, -27, -46, -38, -12, 14, 24, 19, 6, -4, -5, 0 }, r.samples.s8);
 }

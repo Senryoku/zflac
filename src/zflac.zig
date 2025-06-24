@@ -9,25 +9,21 @@ const log_residual = std.log.scoped(.zflac_residual);
 
 const Signature: u32 = 0x664C6143;
 
+const Samples = union(enum) {
+    s8: []align(16) i8,
+    s16: []align(16) i16,
+    s32: []align(16) i32,
+};
+
 pub const DecodedFLAC = struct {
     channels: u8,
     sample_rate: u24,
     bits_per_sample: u8,
-    _samples: []align(16) u8,
+    samples: Samples,
+    _samples_backing: []align(16) u8,
 
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self._samples);
-    }
-
-    pub fn sample_bit_size(self: @This()) u8 {
-        return std.mem.alignForward(u8, self.bits_per_sample, 8);
-    }
-
-    pub fn samples(self: @This(), comptime SampleType: type) ![]SampleType {
-        const expected_bit_size = self.sample_bit_size();
-        const container_bit_size = try std.math.ceilPowerOfTwo(u8, expected_bit_size);
-        if (@bitSizeOf(SampleType) != container_bit_size) return error.UnexpectedSampleType;
-        return @as([*]SampleType, @alignCast(@ptrCast(self._samples.ptr)))[0 .. self._samples.len / (container_bit_size / 8)];
+        allocator.free(self._samples_backing);
     }
 };
 
@@ -217,6 +213,7 @@ fn read_coded_number(reader: anytype) !u64 {
     return coded_number;
 }
 
+/// Caller owns the returned memory and is expected to call `deinit` on the returned struct.
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     const signature = try reader.readInt(u32, .big);
     if (signature != Signature)
@@ -262,8 +259,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
         const decoded = try switch (aligned_sample_bit_size) {
             8 => decode_frames(i8, allocator, si, reader),
             16 => decode_frames(i16, allocator, si, reader),
-            24 => decode_frames(i32, allocator, si, reader),
-            32 => decode_frames(i32, allocator, si, reader),
+            24, 32 => decode_frames(i32, allocator, si, reader),
             else => return error.Unimplemented,
         };
         errdefer decoded.deinit(allocator);
@@ -271,14 +267,13 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
         var computed_md5: [16]u8 = undefined;
         if (aligned_sample_bit_size == 24) {
             // While zig does support i24, i24 in arrays are still 4 bytes aligned. Might as well use i32.
-            const samples_32 = try decoded.samples(i32);
+            const samples_32 = decoded.samples.s32;
             var d = std.crypto.hash.Md5.init(.{});
-            for (0..samples_32.len) |i| {
+            for (0..samples_32.len) |i|
                 d.update(std.mem.asBytes(&samples_32[i])[0..3]);
-            }
             d.final(&computed_md5);
         } else {
-            std.crypto.hash.Md5.hash(decoded._samples, &computed_md5, .{});
+            std.crypto.hash.Md5.hash(decoded._samples_backing, &computed_md5, .{});
         }
 
         if (!std.mem.eql(u8, &computed_md5, &stream_info.?.md5))
@@ -286,9 +281,9 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
 
         // The MD5 checksum is computed on sign extended values (12 to 16 for example), however it seems
         // output conventions differ quite a bit. I don't known if I should do this here, or let the caller deal with it.
-        //   ( - Use unsigned u8 for 8bits per samples. )
-        //   - Up 12bits samples to 16bits by multiplying by 16.
-        //   - Up 24bits samples to 32bits by multiplying by 256.
+        //   TODO: - Convert signed 8bits samples to unsigned 8bits.
+        //   - Up 9-15bits samples to 16bits by shifting.
+        //   - Up 17-31bits samples to 32bits by shifting.
         switch (sample_bit_depth) {
             // 8 => {
             //     for (0..decoded._samples.len) |i| {
@@ -296,13 +291,13 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
             //     }
             // },
             9...15 => |bd| {
-                var samples_16 = try decoded.samples(i16);
+                var samples_16 = decoded.samples.s16;
                 for (0..samples_16.len) |i| {
                     samples_16[i] <<= @intCast(16 - bd);
                 }
             },
             17...31 => |bd| {
-                var samples_32 = try decoded.samples(i32);
+                var samples_32 = decoded.samples.s32;
                 for (0..samples_32.len) |i| {
                     samples_32[i] <<= @intCast(@as(u6, 32) - bd);
                 }
@@ -336,7 +331,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 16, null);
     errdefer allocator.free(samples_backing);
 
-    var samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+    var samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
     var samples_working_buffer = try allocator.alloc(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096);
     defer allocator.free(samples_working_buffer);
@@ -402,7 +397,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             // The buffer will be trimmed to the correct size once the file has been fully processed.
             const new_size = @max(2 * samples.len, expected_samples);
             samples_backing = try allocator.realloc(samples_backing, new_size * @sizeOf(SampleType));
-            samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+            samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
             valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
@@ -583,14 +578,20 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // This should only be possible when the number of samples is unknown (absent from the metadata), or wrong.
         std.debug.assert(!valid_total_sample_count);
         samples_backing = try allocator.realloc(samples_backing, frame_sample_offset * @sizeOf(SampleType));
-        samples = @as([*]SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
+        samples = @as([*]align(16) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
     }
 
     return .{
         .channels = channel_count,
         .sample_rate = sample_rate,
         .bits_per_sample = bits_per_sample,
-        ._samples = samples_backing,
+        .samples = @unionInit(Samples, switch (SampleType) {
+            i8 => "s8",
+            i16 => "s16",
+            i32 => "s32",
+            else => @compileError("Unsupported sample type: " ++ @typeName(SampleType)),
+        }, samples),
+        ._samples_backing = samples_backing,
     };
 }
 

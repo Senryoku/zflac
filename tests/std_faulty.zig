@@ -25,7 +25,7 @@ test "02 - wrong maximum framesize" {
 }
 
 test "03 - wrong bit depth" {
-    try std.testing.expectError(error.UnexpectedSampleType, run_faulty_test("03 - wrong bit depth"));
+    try std.testing.expectError(error.InvalidChecksum, run_faulty_test("03 - wrong bit depth"));
 }
 
 test "04 - wrong number of channels" {

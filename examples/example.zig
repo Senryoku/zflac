@@ -9,7 +9,10 @@ fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    return try zflac.decode(allocator, file.reader());
+    var buffered_reader = std.io.bufferedReader(file.reader());
+    const reader = buffered_reader.reader();
+
+    return try zflac.decode(allocator, reader);
 }
 
 const PlayState = struct {
@@ -17,29 +20,29 @@ const PlayState = struct {
     current_sample: usize,
 
     pub fn fill(self: *PlayState, output: *anyopaque, frame_count: u32) void {
-        switch (self.file.sample_bit_size()) {
-            8 => self._fill(i8, i16, output, frame_count),
-            16 => self._fill(i16, i16, output, frame_count),
-            24 => self._fill(i32, i32, output, frame_count),
-            32 => self._fill(i32, i32, output, frame_count),
-            else => unreachable,
+        switch (self.file.samples) {
+            .s8 => self._fill(i8, i16, output, frame_count),
+            .s16 => self._fill(i16, i16, output, frame_count),
+            .s32 => self._fill(i32, i32, output, frame_count),
         }
     }
 
     pub fn _fill(self: *PlayState, comptime SampleType: type, comptime OutputType: type, output: *anyopaque, frame_count: u32) void {
         var out: [*]OutputType = @ptrCast(@alignCast(output));
-        const samples = self.file.samples(SampleType) catch unreachable;
-        for (0..self.file.channels * frame_count) |i| {
-            if (SampleType == i8 and OutputType == i16) {
-                out[i] = @as(i16, @intCast(samples[self.current_sample])) * 256;
-            } else {
-                out[i] = @intCast(samples[self.current_sample]);
-            }
-            self.current_sample += 1;
-            self.current_sample %= samples.len;
-            if (self.current_sample == 0) {
-                std.log.info("Looping back...", .{});
-            }
+        switch (self.file.samples) {
+            inline else => |samples| {
+                for (0..self.file.channels * frame_count) |i| {
+                    if (SampleType == i8 and OutputType == i16) {
+                        out[i] = @as(i16, @intCast(samples[self.current_sample])) * 256;
+                    } else {
+                        out[i] = @intCast(samples[self.current_sample]);
+                    }
+                    self.current_sample += 1;
+                    self.current_sample %= samples.len;
+                    if (self.current_sample == 0)
+                        std.log.info("Looping back...", .{});
+                }
+            },
         }
     }
 };
@@ -48,6 +51,16 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const r = try decode_standard_test(allocator, "01 - blocksize 4096");
     defer r.deinit(allocator);
+
+    std.debug.print("Decoded:\n", .{});
+    std.debug.print("  Channel count: {d}\n", .{r.channels});
+    std.debug.print("  Sample rate: {d}\n", .{r.sample_rate});
+    std.debug.print("  Bits per samples: {d}\n", .{r.bits_per_sample});
+    std.debug.print("  Sample count: {d}\n", .{switch (r.samples) {
+        .s8 => r.samples.s8.len,
+        .s16 => r.samples.s16.len,
+        .s32 => r.samples.s32.len,
+    }});
 
     zaudio.init(allocator);
     defer zaudio.deinit();
@@ -62,12 +75,10 @@ pub fn main() !void {
     audio_device_config.data_callback = audio_callback;
     audio_device_config.user_data = &play_state;
     audio_device_config.period_size_in_frames = 16;
-    audio_device_config.playback.format = switch (r.sample_bit_size()) {
-        8 => .signed16,
-        16 => .signed16,
-        24 => .signed32,
-        32 => .signed32,
-        else => return error.UnsupportedSampleBitSize,
+    audio_device_config.playback.format = switch (r.samples) {
+        .s8 => .signed16,
+        .s16 => .signed16,
+        .s32 => .signed32,
     };
     audio_device_config.playback.channels = r.channels;
 
