@@ -406,8 +406,8 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
-        // Block size of 1 not allowed except for the last frame.
-        if (block_size == 1 and frame_sample_offset + channel_count * block_size < samples.len) return error.InvalidFrameHeader;
+        // Block size of 1 not allowed except for the very last frame.
+        if (block_size == 1 and (valid_total_sample_count and frame_sample_offset + channel_count * block_size < total_sample_count)) return error.InvalidFrameHeader;
 
         const frame_header_crc = try reader.readInt(u8, .big);
         // TODO: Check CRC
@@ -463,12 +463,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         subframe_samples[channel_count * i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
                 },
                 0b001000...0b001100 => |t| { // Subframe with a fixed predictor of order v-8; i.e., 0, 1, 2, 3 or 4
-                    const order: u3 = @intCast(t & 0b000111);
-                    if (order > 4) return error.InvalidSubframeHeader;
-
                     if (samples_working_buffer.len < block_size)
                         samples_working_buffer = try allocator.realloc(samples_working_buffer, block_size);
 
+                    const order: u3 = @intCast(t & 0b000111);
+                    if (order > 4) return error.InvalidSubframeHeader;
+                    // Unencoded warm-up samples (n = subframe's bits per sample * LPC order).
                     for (0..order) |i|
                         samples_working_buffer[i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
 
@@ -477,23 +477,15 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
                     try decode_residuals(InterType, samples_working_buffer[order..], block_size, order, &bit_reader);
 
-                    switch (order) {
-                        5...7 => unreachable,
-                        0 => {}, // Just the residuals
-                        inline else => |comptime_order| {
-                            for (comptime_order..block_size) |i| {
-                                samples_working_buffer[i] += @intCast(switch (comptime_order) {
-                                    1 => 1 * samples_working_buffer[i - 1],
-                                    2 => 2 * samples_working_buffer[i - 1] - 1 * samples_working_buffer[i - 2],
-                                    3 => 3 * samples_working_buffer[i - 1] - 3 * samples_working_buffer[i - 2] + 1 * samples_working_buffer[i - 3],
-                                    4 => 4 * samples_working_buffer[i - 1] - 6 * samples_working_buffer[i - 2] + 4 * samples_working_buffer[i - 3] - samples_working_buffer[i - 4],
-                                    else => unreachable,
-                                });
-                            }
-                        },
-                        // NOTE: The following vectorized version performs worse than the naïve one, even for order 4.
-                        // const Factors = [5][4]InterType{ .{ 0, 0, 0, 0 }, .{ 1, 0, 0, 0 }, .{ -1, 2, 0, 0 }, .{ 1, -3, 3, 0 }, .{ -1, 4, -6, 4 }, };
-                        // inline else => |comptime_order| linear_predictor(InterType, comptime_order, block_size, 0, Factors[comptime_order][0..comptime_order], samples_working_buffer, residuals),
+                    for (order..block_size) |i| {
+                        samples_working_buffer[i] += switch (order) {
+                            0 => 0, // Just the residuals
+                            1 => 1 * samples_working_buffer[i - 1],
+                            2 => 2 * samples_working_buffer[i - 1] - 1 * samples_working_buffer[i - 2],
+                            3 => 3 * samples_working_buffer[i - 1] - 3 * samples_working_buffer[i - 2] + 1 * samples_working_buffer[i - 3],
+                            4 => 4 * samples_working_buffer[i - 1] - 6 * samples_working_buffer[i - 2] + 4 * samples_working_buffer[i - 3] - samples_working_buffer[i - 4],
+                            else => unreachable,
+                        };
                     }
 
                     // Interleave
@@ -501,11 +493,10 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         subframe_samples[channel_count * i] = @intCast(samples_working_buffer[i]);
                 },
                 0b100000...0b111111 => |t| { // Subframe with a linear predictor of order v-31; i.e., 1 through 32 (inclusive)
-                    const order: u6 = @intCast(t - 31);
-
                     if (samples_working_buffer.len < block_size)
                         samples_working_buffer = try allocator.realloc(samples_working_buffer, block_size);
 
+                    const order: u6 = @intCast(t - 31);
                     // Unencoded warm-up samples (n = subframe's bits per sample * LPC order).
                     for (0..order) |i|
                         samples_working_buffer[i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
