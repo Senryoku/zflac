@@ -522,6 +522,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     switch (order) {
                         0 => {}, // Just the residuals
                         33...63 => unreachable,
+                        inline 32 => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
                         inline else => |comptime_order| {
                             for (comptime_order..block_size) |i| {
                                 var prediction: InterType = 0;
@@ -598,6 +599,16 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         }, samples),
         ._samples_backing = samples_backing,
     };
+}
+
+inline fn linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
+    const pred_vector: @Vector(order, InterType) = predictor_coefficient[0..order].*;
+    for (0..block_size - order) |i| {
+        const s: @Vector(order, InterType) = samples[i..][0..order].*;
+        const predicted_without_shift = @reduce(.Add, pred_vector * s);
+        const predicted = predicted_without_shift >> @intCast(prediction_shift_right);
+        samples[order + i] += predicted;
+    }
 }
 
 fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: anytype) !void {
