@@ -454,10 +454,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 },
                 0b000001 => { // Verbatim subframe
                     log_subframe.debug("Subframe #{d}: Verbatim subframe, {d} wasted bits", .{ channel, wasted_bits });
-                    for (0..block_size) |i| {
-                        subframe_samples[channel_count * i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
-                        if (wasted_bits > 0)
-                            subframe_samples[channel_count * i] <<= @intCast(wasted_bits);
+                    if (wasted_bits > 0) {
+                        for (0..block_size) |i| {
+                            subframe_samples[channel_count * i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth) << @intCast(wasted_bits);
+                        }
+                    } else {
+                        for (0..block_size) |i|
+                            subframe_samples[channel_count * i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
                     }
                 },
                 0b001000...0b001100 => |t| { // Subframe with a fixed predictor of order v-8; i.e., 0, 1, 2, 3 or 4
