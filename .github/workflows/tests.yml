@@ -20,3 +20,4 @@ jobs:
               with:
                 version: ${{ steps.zigversion.outputs.version }}
             - run: zig build test --summary all
+            - run: zig build test --summary all --release=fast
