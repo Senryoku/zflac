@@ -444,7 +444,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             switch (subframe_header.subframe_type) {
                 0b000000 => { // Constant subframe
                     log_subframe.debug("Subframe #{d}: Constant, {d} wasted bits", .{ channel, wasted_bits });
-                    const sample = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, bits_per_sample);
+                    const sample = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, bits_per_sample) << @intCast(wasted_bits);
                     if (channel_count == 1) {
                         @memset(subframe_samples, sample);
                     } else {
@@ -454,8 +454,11 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                 },
                 0b000001 => { // Verbatim subframe
                     log_subframe.debug("Subframe #{d}: Verbatim subframe, {d} wasted bits", .{ channel, wasted_bits });
-                    for (0..block_size) |i|
+                    for (0..block_size) |i| {
                         subframe_samples[channel_count * i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
+                        if (wasted_bits > 0)
+                            subframe_samples[channel_count * i] <<= @intCast(wasted_bits);
+                    }
                 },
                 0b001000...0b001100 => |t| { // Subframe with a fixed predictor of order v-8; i.e., 0, 1, 2, 3 or 4
                     if (samples_working_buffer.len < block_size)
@@ -484,8 +487,11 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     }
 
                     // Interleave
-                    for (0..block_size) |i|
+                    for (0..block_size) |i| {
                         subframe_samples[channel_count * i] = @intCast(samples_working_buffer[i]);
+                        if (wasted_bits > 0)
+                            subframe_samples[channel_count * i] <<= @intCast(wasted_bits);
+                    }
                 },
                 0b100000...0b111111 => |t| { // Subframe with a linear predictor of order v-31; i.e., 1 through 32 (inclusive)
                     if (samples_working_buffer.len < block_size)
@@ -523,15 +529,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         },
                     }
                     // Interleave
-                    for (0..block_size) |i|
+                    for (0..block_size) |i| {
                         subframe_samples[channel_count * i] = @intCast(samples_working_buffer[i]);
+                        if (wasted_bits > 0)
+                            subframe_samples[channel_count * i] <<= @intCast(wasted_bits);
+                    }
                 },
                 0b000010...0b000111, 0b001101...0b011111 => return error.InvalidSubframeHeader, // Reserved
-            }
-
-            if (wasted_bits > 0) {
-                for (0..block_size) |i|
-                    subframe_samples[channel_count * i] <<= @intCast(wasted_bits);
             }
         }
         // NOTE: Last subframe is padded with zero bits to be byte aligned.
