@@ -9,10 +9,11 @@ fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    var buffered_reader = std.io.bufferedReader(file.reader());
-    const reader = buffered_reader.reader();
+    const buffer = try allocator.alloc(u8, 8192);
+    defer allocator.free(buffer);
+    var reader = file.reader(buffer);
 
-    return try zflac.decode(allocator, reader);
+    return try zflac.decode(allocator, &reader.interface);
 }
 
 const PlayState = struct {
@@ -49,7 +50,7 @@ const PlayState = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const r = try decode_standard_test(allocator, "01 - blocksize 4096");
+    const r = try decode_standard_test(allocator, "23 - 8 bit per sample");
     defer r.deinit(allocator);
 
     std.debug.print("Decoded:\n", .{});
@@ -98,7 +99,7 @@ fn audio_callback(
     output: ?*anyopaque,
     _: ?*const anyopaque, // Input
     frame_count: u32,
-) callconv(.C) void {
+) callconv(.c) void {
     const state: *PlayState = @ptrCast(@alignCast(device.getUserData()));
 
     if (output) |out| {

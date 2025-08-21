@@ -7,10 +7,11 @@ fn run_uncommon_test(comptime filename: []const u8) !void {
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/uncommon/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    var buffered_reader = std.io.bufferedReader(file.reader());
-    const reader = buffered_reader.reader();
+    const buffer = try allocator.alloc(u8, 8192);
+    defer allocator.free(buffer);
+    var reader = file.reader(buffer);
 
-    var r = try zflac.decode(allocator, reader);
+    var r = try zflac.decode(allocator, &reader.interface);
     defer r.deinit(allocator);
 }
 

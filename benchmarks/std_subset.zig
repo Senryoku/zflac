@@ -36,15 +36,18 @@ fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *con
     return struct {
         fn run(allocator: std.mem.Allocator) void {
             const file = std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{}) catch |err| {
-                std.debug.panic("Failed to open file: {s}", .{@errorName(err)});
+                std.debug.panic("Failed to open file: {t}", .{err});
             };
             defer file.close();
 
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            const reader = buffered_reader.reader();
+            const buffer = allocator.alloc(u8, 8192) catch |err| {
+                std.debug.panic("Failed to allocate buffer for file reading: {t}", .{err});
+            };
+            defer allocator.free(buffer);
+            var reader = file.reader(buffer);
 
-            var r = impl.decode(allocator, reader) catch |err| {
-                std.debug.panic("Failed to decode FLAC: {s}", .{@errorName(err)});
+            var r = impl.decode(allocator, &reader.interface) catch |err| {
+                std.debug.panic("Failed to decode FLAC: {t}", .{err});
             };
             defer r.deinit(allocator);
         }
@@ -126,5 +129,9 @@ pub fn main() !void {
         try bench.add("(now) " ++ filename, run_standard_test(filename, zflac), .{});
         try bench.add("(ref) " ++ filename, run_standard_test(filename, zflac_ref), .{});
     }
-    try bench.run(std.io.getStdOut().writer());
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+    try bench.run(stdout);
+    try stdout.flush();
 }
