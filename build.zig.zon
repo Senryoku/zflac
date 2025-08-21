@@ -13,6 +13,11 @@
             .hash = "zbench-0.11.1-YTdc7zgmAQDtDcHPFwsLeawui27WjMLWmUwrfz7pIlB2",
             .lazy = true,
         },
+        .zflac = .{
+            .url = "git+https://github.com/Senryoku/zflac.git#96e72c9f04139d26cc940f47e943109cb387b3e6",
+            .hash = "zflac-0.0.0-NYSmhdivAADpiIH0b0p3xYalw9W3ykiPNAVupjyUYmeP",
+            .lazy = true,
+        },
     },
     .paths = .{
         "build.zig",

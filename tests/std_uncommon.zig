@@ -7,7 +7,7 @@ fn run_uncommon_test(comptime filename: []const u8) !void {
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/uncommon/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    const buffer = try allocator.alloc(u8, 256);
+    const buffer = try allocator.alloc(u8, 8192);
     defer allocator.free(buffer);
     var reader = file.reader(buffer);
 
