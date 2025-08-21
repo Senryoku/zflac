@@ -15,6 +15,16 @@ const LowBitMasks = [9]u8{
     0b01111111,
     0b11111111,
 };
+const InvertedLowBitMasks = [8]u8{
+    0b11111111,
+    0b01111111,
+    0b00111111,
+    0b00011111,
+    0b00001111,
+    0b00000111,
+    0b00000011,
+    0b00000001,
+};
 
 pub fn init(reader: *std.Io.Reader) @This() {
     return .{ .reader = reader };
@@ -97,12 +107,13 @@ pub inline fn readUnary(self: *@This()) !u32 {
     // Also accounts for the self.count == 0 case.
     if (self.bits == 0) return self.count + try self.readUnaryFromEmptyBuffer();
     std.debug.assert(self.count > 0);
-    const clz = @clz(self.bits) - (8 - self.count);
+    const clz = @clz(self.bits);
     std.debug.assert(clz < 8);
+    const r = clz - (8 - self.count);
     // Discard those bits and the 1
-    self.count = self.count - 1 - clz;
+    self.count = 7 - clz;
     self.bits &= LowBitMasks[self.count];
-    return clz;
+    return r;
 }
 
 inline fn readUnaryFromEmptyBuffer(self: *@This()) !u32 {
@@ -115,7 +126,7 @@ inline fn readUnaryFromEmptyBuffer(self: *@This()) !u32 {
     const clz = @clz(bits);
     std.debug.assert(clz < 8);
     // Discard those bits and the 1
-    self.count = 8 - 1 - clz;
+    self.count = 7 - clz;
     self.bits = bits & LowBitMasks[self.count];
     return unary_integer + clz;
 }
