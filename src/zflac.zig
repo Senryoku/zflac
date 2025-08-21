@@ -595,7 +595,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     };
 }
 
-// NOTE: This use to be inline, but it started crashing with zig 0.15.1, only in release fast mode. Possibly a compiler bug? Moved to a function as a workaround.
+// NOTE: This used to be inline, but started crashing with zig 0.15.1 (only in release fast mode). Possibly a compiler bug? Moved to a function as a workaround.
 inline fn simple_linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
     for (order..block_size) |i| {
         var prediction: InterType = 0;
