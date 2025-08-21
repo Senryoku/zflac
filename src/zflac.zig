@@ -523,21 +523,8 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     switch (order) {
                         0 => {}, // Just the residuals
                         33...63 => unreachable,
-                        inline else => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
-
-                        // FIXME: The following else branch currently crashes in release fast builds (21/08/2025, zig 0.15.1).
-                        //        Might be miscompilation, I'm not sure, and wasn't able to reproduce it on a minimal test case.
-                        //        This is an issue because it was faster in zig 0.14.0.
-
-                        // inline 32 => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
-                        // inline else => |comptime_order| {
-                        //     for (comptime_order..block_size) |i| {
-                        //         var prediction: InterType = 0;
-                        //         inline for (0..comptime_order) |o|
-                        //             prediction += samples_working_buffer[i - comptime_order + o] * predictor_coefficient[o];
-                        //         samples_working_buffer[i] += prediction >> @intCast(prediction_shift_right);
-                        //     }
-                        // },
+                        inline 32 => |comptime_order| vectorized_linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
+                        inline else => |comptime_order| simple_linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
                     }
                     // Interleave
                     for (0..block_size) |i| {
@@ -608,7 +595,17 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     };
 }
 
-inline fn linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
+// NOTE: This use to be inline, but it started crashing with zig 0.15.1, only in release fast mode. Possibly a compiler bug? Moved to a function as a workaround.
+inline fn simple_linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
+    for (order..block_size) |i| {
+        var prediction: InterType = 0;
+        inline for (0..order) |o|
+            prediction += samples[i - order + o] * predictor_coefficient[o];
+        samples[i] += prediction >> @intCast(prediction_shift_right);
+    }
+}
+
+inline fn vectorized_linear_predictor(comptime InterType: type, comptime order: u6, block_size: u16, prediction_shift_right: u6, predictor_coefficient: []const InterType, samples: []InterType) void {
     const pred_vector: @Vector(order, InterType) = predictor_coefficient[0..order].*;
     for (0..block_size - order) |i| {
         const s: @Vector(order, InterType) = samples[i..][0..order].*;
