@@ -1,6 +1,6 @@
 # zflac
 
-FLAC decoder implemented from [specifications](https://www.rfc-editor.org/rfc/rfc9639.html).
+FLAC decoder for [Zig](https://ziglang.org/) implemented from [specifications](https://www.rfc-editor.org/rfc/rfc9639.html).
 
 ## Getting started
 
