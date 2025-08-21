@@ -9,9 +9,7 @@ fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    var buffered_reader = std.io.bufferedReader(file.reader());
-    const reader = buffered_reader.reader();
-
+    const reader = file.deprecatedReader();
     return try zflac.decode(allocator, reader);
 }
 
@@ -98,7 +96,7 @@ fn audio_callback(
     output: ?*anyopaque,
     _: ?*const anyopaque, // Input
     frame_count: u32,
-) callconv(.C) void {
+) callconv(.c) void {
     const state: *PlayState = @ptrCast(@alignCast(device.getUserData()));
 
     if (output) |out| {

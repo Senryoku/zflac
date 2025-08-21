@@ -328,12 +328,12 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
     const expected_channel_count = @as(usize, stream_info.channel_count) + 1;
     const total_sample_count = expected_channel_count * (if (valid_total_sample_count) stream_info.number_of_samples else 4096);
-    var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, 32, null);
+    var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, .@"32", null);
     errdefer allocator.free(samples_backing);
 
-    var samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+    var samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
-    var samples_working_buffer = try allocator.allocWithOptions(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096, 32, null);
+    var samples_working_buffer = try allocator.allocWithOptions(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096, .@"32", null);
     defer allocator.free(samples_working_buffer);
 
     var frame_sample_offset: usize = 0;
@@ -397,7 +397,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             // The buffer will be trimmed to the correct size once the file has been fully processed.
             const new_size = @max(2 * samples.len, expected_samples);
             samples_backing = try allocator.realloc(samples_backing, new_size * @sizeOf(SampleType));
-            samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+            samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
             valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
@@ -474,7 +474,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         samples_working_buffer[i] = try read_unencoded_sample(SampleType, &bit_reader, wasted_bits, unencoded_samples_bit_depth);
 
                     log_subframe.debug("Subframe #{d}: Fixed predictor of order {d}, {d} wasted bits", .{ channel, order, wasted_bits });
-                    log_subframe.debug("  Warmup Samples: {d}", .{samples_working_buffer[0..order]});
+                    log_subframe.debug("  Warmup Samples: {any}", .{samples_working_buffer[0..order]});
 
                     try decode_residuals(InterType, samples_working_buffer[order..], block_size, order, &bit_reader);
 
@@ -514,8 +514,8 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                         predictor_coefficient[order - 1 - i] = try read_unencoded_sample(InterType, &bit_reader, 0, coefficient_precision);
 
                     log_subframe.debug("Subframe #{d}: Linear predictor of order {d}, {d} bits coefficients, {d} bits right shift, {d} wasted bits", .{ channel, order, coefficient_precision, prediction_shift_right, wasted_bits });
-                    log_subframe.debug("  Warmup Samples: {d}", .{samples_working_buffer[0..order]});
-                    log_subframe.debug("  Predictor Coefficients: {d}", .{predictor_coefficient[0..order]});
+                    log_subframe.debug("  Warmup Samples: {any}", .{samples_working_buffer[0..order]});
+                    log_subframe.debug("  Predictor Coefficients: {any}", .{predictor_coefficient[0..order]});
 
                     try decode_residuals(InterType, samples_working_buffer[order..], block_size, order, &bit_reader);
 
@@ -584,7 +584,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // This should only be possible when the number of samples is unknown (absent from the metadata), or wrong.
         std.debug.assert(!valid_total_sample_count);
         samples_backing = try allocator.realloc(samples_backing, frame_sample_offset * @sizeOf(SampleType));
-        samples = @as([*]align(32) SampleType, @alignCast(@ptrCast(samples_backing.ptr)))[0..frame_sample_offset];
+        samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0..frame_sample_offset];
     }
 
     return .{

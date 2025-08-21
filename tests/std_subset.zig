@@ -7,8 +7,7 @@ fn run_standard_test(comptime filename: []const u8) !void {
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    var buffered_reader = std.io.bufferedReader(file.reader());
-    const reader = buffered_reader.reader();
+    const reader = file.deprecatedReader();
 
     var r = try zflac.decode(allocator, reader);
     defer r.deinit(allocator);
@@ -29,8 +28,8 @@ fn run_standard_test(comptime filename: []const u8) !void {
             }
             try std.testing.expectEqualSlices(i8, expected_i8, samples);
         },
-        .s16 => |samples| try std.testing.expectEqualSlices(i16, @as([*]const i16, @alignCast(@ptrCast(expected)))[0 .. expected.len / 2], samples),
-        .s32 => |samples| try std.testing.expectEqualSlices(i32, @as([*]const i32, @alignCast(@ptrCast(expected)))[0 .. expected.len / 4], samples),
+        .s16 => |samples| try std.testing.expectEqualSlices(i16, @as([*]const i16, @ptrCast(@alignCast(expected)))[0 .. expected.len / 2], samples),
+        .s32 => |samples| try std.testing.expectEqualSlices(i32, @as([*]const i32, @ptrCast(@alignCast(expected)))[0 .. expected.len / 4], samples),
     }
 }
 

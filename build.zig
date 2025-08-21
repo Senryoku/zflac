@@ -88,30 +88,32 @@ pub fn build(b: *std.Build) void {
         const run_step = b.step("run", "Run example");
         run_step.dependOn(&run_example.step);
     }
-    const maybe_zbench = b.lazyDependency("zbench", .{});
-    if (maybe_zbench) |zbench| {
-        const zflac_ref = b.dependency("zflac", .{}); // Previous version to compare against
-        const benchmark_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/std_subset.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zflac", .module = lib_mod },
-                .{ .name = "zflac-ref", .module = zflac_ref.module("zflac") },
-                .{ .name = "zbench", .module = zbench.module("zbench") },
-            },
-        });
+    // const maybe_zbench = b.lazyDependency("zbench", .{});
+    // if (maybe_zbench) |zbench| {
+    //     const maybe_zflac_ref = b.lazyDependency("zflac", .{}); // Previous version to compare against
+    //     if (maybe_zflac_ref) |zflac_ref| {
+    //         const benchmark_module = b.createModule(.{
+    //             .root_source_file = b.path("benchmarks/std_subset.zig"),
+    //             .target = target,
+    //             .optimize = optimize,
+    //             .imports = &.{
+    //                 .{ .name = "zflac", .module = lib_mod },
+    //                 .{ .name = "zflac-ref", .module = zflac_ref.module("zflac") },
+    //                 .{ .name = "zbench", .module = zbench.module("zbench") },
+    //             },
+    //         });
 
-        const benchmark = b.addExecutable(.{
-            .name = "benchmark",
-            .root_module = benchmark_module,
-        });
+    //         const benchmark = b.addExecutable(.{
+    //             .name = "benchmark",
+    //             .root_module = benchmark_module,
+    //         });
 
-        b.installArtifact(benchmark);
+    //         b.installArtifact(benchmark);
 
-        const run_benchmark = b.addRunArtifact(benchmark);
-        run_benchmark.step.dependOn(b.getInstallStep());
-        const run_step = b.step("bench", "Run benchmark");
-        run_step.dependOn(&run_benchmark.step);
-    }
+    //         const run_benchmark = b.addRunArtifact(benchmark);
+    //         run_benchmark.step.dependOn(b.getInstallStep());
+    //         const run_step = b.step("bench", "Run benchmark");
+    //         run_step.dependOn(&run_benchmark.step);
+    //     }
+    // }
 }
