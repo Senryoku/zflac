@@ -24,11 +24,11 @@ pub fn main() !void {
 	const file = try std.fs.cwd().openFile("music.flac", .{});
 	defer file.close();
 	
-	// Prefer a buffered reader for performance.
-	var buffered_reader = std.io.bufferedReader(file.reader());
-	const reader = buffered_reader.reader();
+    const buffer = try allocator.alloc(u8, 8192);
+    defer allocator.free(buffer);
+    var reader = file.reader(buffer);
 	
-	const decoded = try zflac.decode(allocator, reader); 
+	const decoded = try zflac.decode(allocator, &reader.interface); 
 	defer decoded.deinit(allocator);
 	
 	// The returned structure holds some basic information on your file:
