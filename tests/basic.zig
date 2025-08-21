@@ -10,9 +10,9 @@ test "Example 1" {
         0xbf, 0x03, 0x58, 0xfd, 0x03, 0x12, 0x8b, 0xaa, 0x9a,
     };
 
-    var file = std.io.fixedBufferStream(&Example);
+    var reader = std.Io.Reader.fixed(&Example);
 
-    var r = try zflac.decode(std.testing.allocator, file.reader());
+    var r = try zflac.decode(std.testing.allocator, &reader);
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(2, r.channels);
@@ -43,9 +43,9 @@ test "Example 2" {
         0xff, 0xf8, 0x69, 0x18, 0x01, 0x02, 0xa4, 0x02, 0xc3, 0x82, 0xc4, 0x0b,
         0xc1, 0x4a, 0x03, 0xee, 0x48, 0xdd, 0x03, 0xb6, 0x7c, 0x13, 0x30,
     };
-    var file = std.io.fixedBufferStream(&Example);
+    var reader = std.Io.Reader.fixed(&Example);
 
-    var r = try zflac.decode(std.testing.allocator, file.reader());
+    var r = try zflac.decode(std.testing.allocator, &reader);
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(2, r.channels);
@@ -84,9 +84,9 @@ test "Example 3" {
         0x6d, 0x09, 0x08, 0x31, 0x45, 0x2b, 0xdc, 0x28, 0x22, 0x22, 0x80, 0x57,
         0xa3,
     };
-    var file = std.io.fixedBufferStream(&Example);
+    var reader = std.Io.Reader.fixed(&Example);
 
-    var r = try zflac.decode(std.testing.allocator, file.reader());
+    var r = try zflac.decode(std.testing.allocator, &reader);
     defer r.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(1, r.channels);

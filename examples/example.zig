@@ -9,8 +9,11 @@ fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const
     const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
     defer file.close();
 
-    const reader = file.deprecatedReader();
-    return try zflac.decode(allocator, reader);
+    const buffer = try allocator.alloc(u8, 256);
+    defer allocator.free(buffer);
+    var reader = file.reader(buffer);
+
+    return try zflac.decode(allocator, &reader.interface);
 }
 
 const PlayState = struct {

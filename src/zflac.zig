@@ -200,28 +200,28 @@ inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: anytype, 
     return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample - wasted_bits));
 }
 
-fn read_coded_number(reader: anytype) !u64 {
-    const first_byte = try reader.readByte();
+fn read_coded_number(reader: *std.Io.Reader) !u64 {
+    const first_byte = try reader.takeByte();
     const byte_count = @clz(first_byte ^ 0xFF);
     if (first_byte == 0xFF or byte_count == 1) return error.InvalidCodedNumber;
     if (byte_count == 0) return first_byte;
     var coded_number: u64 = (first_byte & (@as(u8, 0x7F) >> @intCast(byte_count)));
     for (0..byte_count - 1) |_| {
         coded_number <<= 6;
-        coded_number |= (try reader.readByte()) & 0x3F;
+        coded_number |= (try reader.takeByte()) & 0x3F;
     }
     return coded_number;
 }
 
 /// Caller owns the returned memory and is expected to call `deinit` on the returned struct.
-pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
-    const signature = try reader.readInt(u32, .big);
+pub fn decode(allocator: std.mem.Allocator, reader: *std.Io.Reader) !DecodedFLAC {
+    const signature = try reader.takeInt(u32, .big);
     if (signature != Signature)
         return error.InvalidSignature;
 
     var stream_info: ?StreaminfoMetadata = null;
     while (true) {
-        var header = try reader.readStruct(MetadataHeader);
+        var header = try reader.takeStruct(MetadataHeader, .little);
         header.length = @byteSwap(header.length);
 
         switch (header.info) {
@@ -236,15 +236,16 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
                     .channel_count = try bit_reader.readBitsNoEof(u3, 3), // NOTE: channel count - 1
                     .sample_bit_depth = try bit_reader.readBitsNoEof(u5, 5), // NOTE: bits per sample - 1
                     .number_of_samples = try bit_reader.readBitsNoEof(u36, 36),
-                    .md5 = try reader.readBytesNoEof(16),
+                    .md5 = undefined,
                 };
+                @memcpy(&stream_info.?.md5, try reader.takeArray(16));
                 log.debug("{any}", .{stream_info});
             },
             .Application, .Seektable, .VorbisComment, .Cuesheet, .Picture => {
                 log.info(" Unhandled header: {s}", .{@tagName(header.info)});
-                try reader.skipBytes(header.length, .{});
+                std.debug.assert(try reader.discard(.limited(header.length)) == header.length);
             },
-            .Padding => try reader.skipBytes(header.length, .{}),
+            .Padding => std.debug.assert(try reader.discard(.limited(header.length)) == header.length),
             else => return error.InvalidMetadataHeader,
         }
 
@@ -309,7 +310,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !DecodedFLAC {
     } else return error.MissingStreaminfo;
 }
 
-fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream_info: StreaminfoMetadata, reader: anytype) !DecodedFLAC {
+fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream_info: StreaminfoMetadata, reader: *std.Io.Reader) !DecodedFLAC {
     // Larger type for intermediate computations
     const InterType = switch (SampleType) {
         i8 => i16,
@@ -340,7 +341,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     while (true) {
         if (valid_total_sample_count and frame_sample_offset >= total_sample_count) break;
 
-        const frame_header: FrameHeader = @bitCast(reader.readInt(u32, .big) catch |err| {
+        const frame_header: FrameHeader = @bitCast(reader.takeInt(u32, .big) catch |err| {
             if (valid_total_sample_count) return err; // Unexpected EOF, based on the expected number of samples from the metadata.
             // Unknown number of samples: EndOfStream on frame boundary isn't necessarily an error.
             switch (err) {
@@ -351,13 +352,13 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         if (frame_header.frame_sync != (0xFFF8 >> 1))
             return error.InvalidFrameHeader; // NOTE: We could try to return normally when valid_total_sample_count is false here. The CRC check should catch if this was the wrong decision.
 
-        const coded_number = try read_coded_number(&reader);
+        const coded_number = try read_coded_number(reader);
 
         const block_size: u16 = switch (frame_header.block_size) {
             .Reserved => return error.InvalidFrameHeader,
-            .Uncommon8b => @as(u16, try reader.readInt(u8, .big)) + 1,
+            .Uncommon8b => @as(u16, try reader.takeInt(u8, .big)) + 1,
             .Uncommon16b => bs: {
-                const ubs = try reader.readInt(u16, .big);
+                const ubs = try reader.takeInt(u16, .big);
                 if (ubs == std.math.maxInt(u16)) return error.InvalidFrameHeader;
                 break :bs ubs + 1;
             },
@@ -366,9 +367,9 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
 
         const frame_sample_rate: u24 = switch (frame_header.sample_rate) {
             .StoredInMetadata => stream_info.sample_rate,
-            .Uncommon8b => try reader.readInt(u8, .big),
-            .Uncommon16b => try reader.readInt(u16, .big),
-            .Uncommon16bx10 => 10 * @as(u24, try reader.readInt(u16, .big)),
+            .Uncommon8b => try reader.takeInt(u8, .big),
+            .Uncommon16b => try reader.takeInt(u16, .big),
+            .Uncommon16bx10 => 10 * @as(u24, try reader.takeInt(u16, .big)),
             .Forbidden => return error.InvalidFrameHeader,
             else => |sr| sr.hz(),
         };
@@ -404,7 +405,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // Block size of 1 not allowed except for the very last frame.
         if (block_size == 1 and (valid_total_sample_count and frame_sample_offset + channel_count * block_size < total_sample_count)) return error.InvalidFrameHeader;
 
-        const frame_header_crc = try reader.readInt(u8, .big);
+        const frame_header_crc = try reader.takeInt(u8, .big);
         // TODO: Check CRC
         // Finally, an 8-bit CRC follows the frame/sample number, an uncommon block size, or an uncommon sample rate (depending on whether the latter two are stored).
         // This CRC is initialized with 0 and has the polynomial x^8 + x^2 + x^1 + x^0. This CRC covers the whole frame header before the CRC, including the sync code.
@@ -545,7 +546,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // NOTE: Last subframe is padded with zero bits to be byte aligned.
         bit_reader.alignToByte();
 
-        const frame_crc = try reader.readInt(u16, .big);
+        const frame_crc = try reader.takeInt(u16, .big);
         _ = frame_crc;
         // TODO: Check CRC
         // "Following this is a 16-bit CRC, initialized with 0, with the polynomial x^16 + x^15 + x^2 + x^0. This CRC covers the whole frame, excluding the 16-bit CRC but including the sync code."

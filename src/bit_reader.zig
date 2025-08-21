@@ -41,14 +41,14 @@ pub fn BitReader(comptime Reader: type) type {
                     std.debug.assert(bits_left == 8);
                     std.debug.assert(self.bits == 0);
                     std.debug.assert(self.count == 0);
-                    return @intCast(try self.reader.readByte());
+                    return @intCast(try self.reader.takeByte());
                 } else {
                     const full_bytes_left = bits_left / 8;
                     std.debug.assert(full_bytes_left <= @sizeOf(T));
 
                     for (0..full_bytes_left) |_| {
                         out <<= 8;
-                        out |= try self.reader.readByte();
+                        out |= try self.reader.takeByte();
                     }
 
                     bits_left %= 8;
@@ -58,7 +58,7 @@ pub fn BitReader(comptime Reader: type) type {
 
             std.debug.assert(bits_left > 0 and bits_left < 8);
 
-            const final_byte = try self.reader.readByte();
+            const final_byte = try self.reader.takeByte();
             const keep = 8 - bits_left;
 
             out <<= @intCast(bits_left);
@@ -106,10 +106,10 @@ pub fn BitReader(comptime Reader: type) type {
 
         inline fn readUnaryFromEmptyBuffer(self: *@This()) !u32 {
             var unary_integer: u32 = 0;
-            var bits = try self.reader.readByte();
+            var bits = try self.reader.takeByte();
             while (bits == 0) { // <=> clz == 8
                 unary_integer += 8;
-                bits = try self.reader.readByte();
+                bits = try self.reader.takeByte();
             }
             const clz = @clz(bits);
             std.debug.assert(clz < 8);
