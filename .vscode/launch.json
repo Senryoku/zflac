@@ -1,0 +1,15 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug (Release)",
+			"type": "cppvsdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/zig-out/bin/example",
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"preLaunchTask": "build-release-fast"
+		}
+	]
+}

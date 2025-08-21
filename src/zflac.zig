@@ -332,7 +332,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
     var samples_backing = try allocator.allocWithOptions(u8, @sizeOf(SampleType) * total_sample_count, .@"32", null);
     errdefer allocator.free(samples_backing);
 
-    var samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+    var samples = @as([*]align(32) SampleType, @ptrCast(samples_backing.ptr))[0 .. samples_backing.len / @sizeOf(SampleType)];
 
     var samples_working_buffer = try allocator.allocWithOptions(InterType, if (stream_info.max_block_size > 0) stream_info.max_block_size else 4096, .@"32", null);
     defer allocator.free(samples_working_buffer);
@@ -398,7 +398,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
             // The buffer will be trimmed to the correct size once the file has been fully processed.
             const new_size = @max(2 * samples.len, expected_samples);
             samples_backing = try allocator.realloc(samples_backing, new_size * @sizeOf(SampleType));
-            samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0 .. samples_backing.len / @sizeOf(SampleType)];
+            samples = @as([*]align(32) SampleType, @ptrCast(samples_backing.ptr))[0 .. samples_backing.len / @sizeOf(SampleType)];
             valid_total_sample_count = false; // We now know the number of samples from the metadata was wrong, we can't rely on it to stop processing the file.
         }
 
@@ -585,7 +585,7 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
         // This should only be possible when the number of samples is unknown (absent from the metadata), or wrong.
         std.debug.assert(!valid_total_sample_count);
         samples_backing = try allocator.realloc(samples_backing, frame_sample_offset * @sizeOf(SampleType));
-        samples = @as([*]align(32) SampleType, @ptrCast(@alignCast(samples_backing.ptr)))[0..frame_sample_offset];
+        samples = @as([*]align(32) SampleType, @ptrCast(samples_backing.ptr))[0..frame_sample_offset];
     }
 
     return .{

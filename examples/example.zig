@@ -50,7 +50,7 @@ const PlayState = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const r = try decode_standard_test(allocator, "01 - blocksize 4096");
+    const r = try decode_standard_test(allocator, "23 - 8 bit per sample");
     defer r.deinit(allocator);
 
     std.debug.print("Decoded:\n", .{});
