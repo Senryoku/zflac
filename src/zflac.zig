@@ -185,7 +185,7 @@ const SubframeHeader = packed struct {
 };
 
 /// Reads a signed integer with a runtime known bit depth
-inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: u6) !T {
+inline fn read_signed_integer(comptime T: type, bit_reader: *BitReader, bit_depth: u6) !T {
     std.debug.assert(bit_depth > 0 and bit_depth <= @bitSizeOf(T));
     const ContainerType = std.meta.Int(.unsigned, @bitSizeOf(T));
     var r = try bit_reader.readBitsNoEof(ContainerType, bit_depth);
@@ -195,7 +195,7 @@ inline fn read_signed_integer(comptime T: type, bit_reader: anytype, bit_depth: 
     return @as(T, @bitCast(r)) >> @intCast(shift);
 }
 
-inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: anytype, wasted_bits: u6, bits_per_sample: u6) !SampleType {
+inline fn read_unencoded_sample(comptime SampleType: type, bit_reader: *BitReader, wasted_bits: u6, bits_per_sample: u6) !SampleType {
     const InterType = std.meta.Int(.signed, try std.math.ceilPowerOfTwo(u32, @bitSizeOf(SampleType) + 1));
     return @intCast(try read_signed_integer(InterType, bit_reader, bits_per_sample - wasted_bits));
 }
@@ -615,7 +615,7 @@ inline fn vectorized_linear_predictor(comptime InterType: type, comptime order: 
     }
 }
 
-fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: anytype) !void {
+fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, block_size: u16, order: u6, bit_reader: *BitReader) !void {
     std.debug.assert(residuals.len >= block_size - order);
 
     const coding_method = try bit_reader.readBitsNoEof(u2, 2);
@@ -636,7 +636,7 @@ fn decode_residuals(comptime ResidualType: type, residuals: []ResidualType, bloc
     }
 }
 
-fn decode_residual_partition(comptime ResidualType: type, comptime coding_method: enum(u2) { Rice = 0, Rice2 = 1 }, residuals: []ResidualType, bit_reader: anytype) !void {
+fn decode_residual_partition(comptime ResidualType: type, comptime coding_method: enum(u2) { Rice = 0, Rice2 = 1 }, residuals: []ResidualType, bit_reader: *BitReader) !void {
     const UnsignedResidualType = std.meta.Int(.unsigned, @bitSizeOf(ResidualType));
     const RiceParameterType = switch (coding_method) {
         .Rice => u4,
