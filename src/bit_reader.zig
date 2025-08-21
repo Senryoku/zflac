@@ -2,7 +2,7 @@ const std = @import("std");
 
 reader: *std.Io.Reader,
 bits: u8 = 0,
-count: u4 = 0,
+count: u8 = 0,
 
 const LowBitMasks = [9]u8{
     0b00000000,
@@ -67,8 +67,10 @@ pub inline fn readBitsNoEof(self: *@This(), comptime T: type, num: u32) !T {
     return @intCast(out);
 }
 
-inline fn removeBits(self: *@This(), num: u4) u8 {
-    if (num == 8) return self.flush();
+inline fn removeBits(self: *@This(), num: u8) u8 {
+    std.debug.assert(self.count <= 8);
+    std.debug.assert(num <= 8);
+    std.debug.assert(num <= self.count);
 
     const keep = self.count - num;
     const bits = self.bits >> @intCast(keep);
@@ -91,9 +93,10 @@ pub inline fn alignToByte(self: *@This()) void {
 }
 
 pub inline fn readUnary(self: *@This()) !u32 {
+    std.debug.assert(self.count <= 8);
     // Also accounts for the self.count == 0 case.
     if (self.bits == 0) return self.count + try self.readUnaryFromEmptyBuffer();
-    std.debug.assert(self.count > 0 and self.count <= 8);
+    std.debug.assert(self.count > 0);
     const clz = @clz(self.bits) - (8 - self.count);
     std.debug.assert(clz < 8);
     // Discard those bits and the 1
