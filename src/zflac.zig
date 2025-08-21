@@ -523,15 +523,21 @@ fn decode_frames(comptime SampleType: type, allocator: std.mem.Allocator, stream
                     switch (order) {
                         0 => {}, // Just the residuals
                         33...63 => unreachable,
-                        inline 32 => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
-                        inline else => |comptime_order| {
-                            for (comptime_order..block_size) |i| {
-                                var prediction: InterType = 0;
-                                inline for (0..comptime_order) |o|
-                                    prediction += samples_working_buffer[i - comptime_order + o] * predictor_coefficient[o];
-                                samples_working_buffer[i] += prediction >> @intCast(prediction_shift_right);
-                            }
-                        },
+                        inline else => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
+
+                        // FIXME: The following else branch currently crashes in release fast builds (21/08/2025, zig 0.15.1).
+                        //        Might be miscompilation, I'm not sure, and wasn't able to reproduce it on a minimal test case.
+                        //        This is an issue because it was faster in zig 0.14.0.
+
+                        // inline 32 => |comptime_order| linear_predictor(InterType, comptime_order, block_size, prediction_shift_right, predictor_coefficient[0..comptime_order], samples_working_buffer),
+                        // inline else => |comptime_order| {
+                        //     for (comptime_order..block_size) |i| {
+                        //         var prediction: InterType = 0;
+                        //         inline for (0..comptime_order) |o|
+                        //             prediction += samples_working_buffer[i - comptime_order + o] * predictor_coefficient[o];
+                        //         samples_working_buffer[i] += prediction >> @intCast(prediction_shift_right);
+                        //     }
+                        // },
                     }
                     // Interleave
                     for (0..block_size) |i| {
