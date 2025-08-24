@@ -25,6 +25,14 @@ pub const DecodedFLAC = struct {
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         allocator.free(self._samples_backing);
     }
+
+    pub fn sample_count(self: @This()) usize {
+        return switch (self.samples) {
+            .s8 => self.samples.s8.len,
+            .s16 => self.samples.s16.len,
+            .s32 => self.samples.s32.len,
+        };
+    }
 };
 
 const MetadataHeader = packed struct {

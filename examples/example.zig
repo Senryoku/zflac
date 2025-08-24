@@ -19,6 +19,22 @@ fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const
 const PlayState = struct {
     file: *const zflac.DecodedFLAC,
     current_sample: usize,
+    progress: std.Progress.Node,
+    progress_node: std.Progress.Node,
+
+    pub fn init(file: *const zflac.DecodedFLAC) PlayState {
+        const parent_node = std.Progress.start(.{});
+        return .{
+            .file = file,
+            .current_sample = 0,
+            .progress = parent_node,
+            .progress_node = parent_node.start("Playing", file.sample_count()),
+        };
+    }
+
+    pub fn deinit(self: *PlayState) void {
+        self.progress.end();
+    }
 
     pub fn fill(self: *PlayState, output: *anyopaque, frame_count: u32) void {
         switch (self.file.samples) {
@@ -40,8 +56,12 @@ const PlayState = struct {
                     }
                     self.current_sample += 1;
                     self.current_sample %= samples.len;
-                    if (self.current_sample == 0)
+                    self.progress_node.completeOne();
+                    if (self.current_sample == 0) {
+                        self.progress_node.end();
+                        self.progress_node = self.progress.start("Playing", self.file.sample_count());
                         std.log.info("Looping back...", .{});
+                    }
                 }
             },
         }
@@ -57,19 +77,13 @@ pub fn main() !void {
     std.debug.print("  Channel count: {d}\n", .{r.channels});
     std.debug.print("  Sample rate: {d}\n", .{r.sample_rate});
     std.debug.print("  Bits per samples: {d}\n", .{r.bits_per_sample});
-    std.debug.print("  Sample count: {d}\n", .{switch (r.samples) {
-        .s8 => r.samples.s8.len,
-        .s16 => r.samples.s16.len,
-        .s32 => r.samples.s32.len,
-    }});
+    std.debug.print("  Sample count: {d}\n", .{r.sample_count()});
 
     zaudio.init(allocator);
     defer zaudio.deinit();
 
-    var play_state: PlayState = .{
-        .file = &r,
-        .current_sample = 0,
-    };
+    var play_state: PlayState = .init(&r);
+    defer play_state.deinit();
 
     var audio_device_config = zaudio.Device.Config.init(.playback);
     audio_device_config.sample_rate = r.sample_rate;
