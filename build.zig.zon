@@ -9,8 +9,8 @@
             .lazy = true,
         },
         .zbench = .{
-            .url = "git+https://github.com/hendriknielaender/zBench.git#a945e79374556f858d5077b1ab8440a8a87349c0",
-            .hash = "zbench-0.11.1-YTdc7zgmAQDtDcHPFwsLeawui27WjMLWmUwrfz7pIlB2",
+            .url = "git+https://github.com/hendriknielaender/zBench#3268a23da82231f1bd2c064de7fdf6fb7056126f",
+            .hash = "zbench-0.11.2-YTdc7zolAQDlBF9i0ywXIvDjafL3Kg27S-aFUq6dU5zy",
             .lazy = true,
         },
         .zflac = .{
