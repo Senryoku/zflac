@@ -1,6 +1,7 @@
 .{
     .name = .zflac,
-    .version = "0.0.0",
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.1",
     .fingerprint = 0x829dffec85a68435,
     .dependencies = .{
         .zaudio = .{
@@ -14,8 +15,7 @@
             .lazy = true,
         },
         .zflac = .{
-            .url = "git+https://github.com/Senryoku/zflac.git#e84ec584578af081c2818f75cd55657606957544",
-            .hash = "zflac-0.0.0-NYSmhdmxAABSM9aTuyiZbD5wcDb5FMiRY6FeZ6kYomiM",
+            .path = "benchref/",
             .lazy = true,
         },
     },

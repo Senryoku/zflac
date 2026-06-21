@@ -3,6 +3,14 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const options = b.addOptions();
+
+    // Options to avoid fetching optional dependencies
+    // FIXME: https://github.com/ziglang/zig/issues/21525
+    const build_examples = b.option(bool, "examples", "Build examples") orelse false;
+    const build_bench = b.option(bool, "bench", "Build benchmark") orelse false;
+    options.addOption(bool, "examples", build_examples);
+    options.addOption(bool, "bench", build_bench);
 
     // Library
 
@@ -61,59 +69,63 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_std_faulty_tests.step);
 
     // Examples (currently used for testing while developing)
-
-    const maybe_zaudio = b.lazyDependency("zaudio", .{});
-    if (maybe_zaudio) |zaudio| {
-        const example_module = b.createModule(.{
-            .root_source_file = b.path("examples/example.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zflac", .module = lib_mod },
-            },
-        });
-
-        const example = b.addExecutable(.{
-            .name = "example",
-            .root_module = example_module,
-        });
-
-        example.root_module.addImport("zaudio", zaudio.module("root"));
-        example.linkLibrary(zaudio.artifact("miniaudio"));
-
-        b.installArtifact(example);
-
-        const run_example = b.addRunArtifact(example);
-        run_example.step.dependOn(b.getInstallStep());
-        const run_step = b.step("run", "Run example");
-        run_step.dependOn(&run_example.step);
-    }
-    const maybe_zbench = b.lazyDependency("zbench", .{});
-    if (maybe_zbench) |zbench| {
-        const maybe_zflac_ref = b.lazyDependency("zflac", .{}); // Previous version to compare against
-        if (maybe_zflac_ref) |zflac_ref| {
-            const benchmark_module = b.createModule(.{
-                .root_source_file = b.path("benchmarks/std_subset.zig"),
+    if (build_examples) {
+        const maybe_zaudio = b.lazyDependency("zaudio", .{});
+        if (maybe_zaudio) |zaudio| {
+            const example_module = b.createModule(.{
+                .root_source_file = b.path("examples/example.zig"),
                 .target = target,
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "zflac", .module = lib_mod },
-                    .{ .name = "zflac-ref", .module = zflac_ref.module("zflac") },
-                    .{ .name = "zbench", .module = zbench.module("zbench") },
                 },
             });
 
-            const benchmark = b.addExecutable(.{
-                .name = "benchmark",
-                .root_module = benchmark_module,
+            const example = b.addExecutable(.{
+                .name = "example",
+                .root_module = example_module,
             });
 
-            b.installArtifact(benchmark);
+            example.root_module.addImport("zaudio", zaudio.module("root"));
+            example.linkLibrary(zaudio.artifact("miniaudio"));
 
-            const run_benchmark = b.addRunArtifact(benchmark);
-            run_benchmark.step.dependOn(b.getInstallStep());
-            const run_step = b.step("bench", "Run benchmark");
-            run_step.dependOn(&run_benchmark.step);
+            b.installArtifact(example);
+
+            const run_example = b.addRunArtifact(example);
+            run_example.step.dependOn(b.getInstallStep());
+            const run_step = b.step("run", "Run example");
+            run_step.dependOn(&run_example.step);
+        }
+    }
+
+    if (build_bench) {
+        const maybe_zbench = b.lazyDependency("zbench", .{});
+        if (maybe_zbench) |zbench| {
+            const maybe_zflac_ref = b.lazyDependency("zflac", .{}); // Previous version to compare against
+            if (maybe_zflac_ref) |zflac_ref| {
+                const benchmark_module = b.createModule(.{
+                    .root_source_file = b.path("benchmarks/std_subset.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                    .imports = &.{
+                        .{ .name = "zflac", .module = lib_mod },
+                        .{ .name = "zflac-ref", .module = zflac_ref.module("zflac") },
+                        .{ .name = "zbench", .module = zbench.module("zbench") },
+                    },
+                });
+
+                const benchmark = b.addExecutable(.{
+                    .name = "benchmark",
+                    .root_module = benchmark_module,
+                });
+
+                b.installArtifact(benchmark);
+
+                const run_benchmark = b.addRunArtifact(benchmark);
+                run_benchmark.step.dependOn(b.getInstallStep());
+                const run_step = b.step("bench", "Run benchmark");
+                run_step.dependOn(&run_benchmark.step);
+            }
         }
     }
 }
