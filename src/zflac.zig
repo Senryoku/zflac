@@ -682,7 +682,7 @@ fn decode_residual_partition(comptime ResidualType: type, comptime coding_method
         },
         inline else => |comptime_rice_parameter| {
             if (comptime_rice_parameter >= @bitSizeOf(UnsignedResidualType)) unreachable;
-            const BatchSize = 16;
+            const BatchSize = std.simd.suggestVectorLength(UnsignedResidualType) orelse 16;
             var zigzag_encoded: [BatchSize]UnsignedResidualType align(32) = undefined;
             for (0..residuals.len / BatchSize) |i| {
                 for (0..BatchSize) |j| {
