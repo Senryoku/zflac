@@ -87,7 +87,7 @@ pub fn build(b: *std.Build) void {
             });
 
             example.root_module.addImport("zaudio", zaudio.module("root"));
-            example.linkLibrary(zaudio.artifact("miniaudio"));
+            example.root_module.linkLibrary(zaudio.artifact("miniaudio"));
 
             b.installArtifact(example);
 
