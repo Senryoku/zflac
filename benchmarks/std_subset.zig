@@ -32,19 +32,21 @@ const UTF8ConsoleOutput = struct {
     }
 };
 
+var test_io: std.Io = undefined;
+
 fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *const fn (std.mem.Allocator) void {
     return struct {
         fn run(allocator: std.mem.Allocator) void {
-            const file = std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{}) catch |err| {
+            const file = std.Io.Dir.cwd().openFile(test_io, "test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{}) catch |err| {
                 std.debug.panic("Failed to open file: {t}", .{err});
             };
-            defer file.close();
+            defer file.close(test_io);
 
             const buffer = allocator.alloc(u8, 8192) catch |err| {
                 std.debug.panic("Failed to allocate buffer for file reading: {t}", .{err});
             };
             defer allocator.free(buffer);
-            var reader = file.reader(buffer);
+            var reader = file.reader(test_io, buffer);
 
             var r = impl.decode(allocator, &reader.interface) catch |err| {
                 std.debug.panic("Failed to decode FLAC: {t}", .{err});
@@ -54,11 +56,16 @@ fn run_standard_test(comptime filename: []const u8, comptime impl: anytype) *con
     }.run;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
+
+    test_io = io;
+
     const cp_out = UTF8ConsoleOutput.init();
     defer cp_out.deinit();
 
-    var bench = zbench.Benchmark.init(std.heap.page_allocator, .{});
+    var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
     inline for (&[_][]const u8{
         "01 - blocksize 4096",
@@ -129,9 +136,6 @@ pub fn main() !void {
         try bench.add("(now) " ++ filename, run_standard_test(filename, zflac), .{});
         try bench.add("(ref) " ++ filename, run_standard_test(filename, zflac_ref), .{});
     }
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
-    try bench.run(stdout);
-    try stdout.flush();
+    const stdout: std.Io.File = .stdout();
+    try bench.run(io, stdout);
 }

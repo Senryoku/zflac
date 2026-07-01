@@ -2,21 +2,20 @@ const std = @import("std");
 const zflac = @import("zflac");
 
 fn run_standard_test(comptime filename: []const u8) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
 
-    const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, "test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
+    defer file.close(io);
 
     const buffer = try allocator.alloc(u8, 8192);
     defer allocator.free(buffer);
-    var reader = file.reader(buffer);
+    var reader = file.reader(io, buffer);
 
     var r = try zflac.decode(allocator, &reader.interface);
     defer r.deinit(allocator);
 
-    const expected_samples_file = try std.fs.cwd().openFile("tests/expected_samples/" ++ filename ++ ".raw", .{});
-    defer expected_samples_file.close();
-    const expected = try expected_samples_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const expected = try std.Io.Dir.cwd().readFileAlloc(io, "tests/expected_samples/" ++ filename ++ ".raw", allocator, .unlimited);
     defer allocator.free(expected);
 
     switch (r.samples) {

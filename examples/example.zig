@@ -5,13 +5,13 @@ const zaudio = @import("zaudio");
 
 pub const log_level: std.log.Level = .debug;
 
-fn decode_standard_test(allocator: std.mem.Allocator, comptime filename: []const u8) !zflac.DecodedFLAC {
-    const file = try std.fs.cwd().openFile("test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
-    defer file.close();
+fn decode_standard_test(io: std.Io, allocator: std.mem.Allocator, comptime filename: []const u8) !zflac.DecodedFLAC {
+    const file = try std.Io.Dir.cwd().openFile(io, "test-files/ietf-wg-cellar/subset/" ++ filename ++ ".flac", .{});
+    defer file.close(io);
 
     const buffer = try allocator.alloc(u8, 8192);
     defer allocator.free(buffer);
-    var reader = file.reader(buffer);
+    var reader = file.reader(io, buffer);
 
     return try zflac.decode(allocator, &reader.interface);
 }
@@ -22,8 +22,8 @@ const PlayState = struct {
     progress: std.Progress.Node,
     progress_node: std.Progress.Node,
 
-    pub fn init(file: *const zflac.DecodedFLAC) PlayState {
-        const parent_node = std.Progress.start(.{});
+    pub fn init(io: std.Io, file: *const zflac.DecodedFLAC) PlayState {
+        const parent_node = std.Progress.start(io, .{});
         return .{
             .file = file,
             .current_sample = 0,
@@ -68,9 +68,10 @@ const PlayState = struct {
     }
 };
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    const r = try decode_standard_test(allocator, "23 - 8 bit per sample");
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
+    const r = try decode_standard_test(io, allocator, "23 - 8 bit per sample");
     defer r.deinit(allocator);
 
     std.debug.print("Decoded:\n", .{});
@@ -79,10 +80,10 @@ pub fn main() !void {
     std.debug.print("  Bits per samples: {d}\n", .{r.bits_per_sample});
     std.debug.print("  Sample count: {d}\n", .{r.sample_count()});
 
-    zaudio.init(allocator);
+    zaudio.init(allocator, io);
     defer zaudio.deinit();
 
-    var play_state: PlayState = .init(&r);
+    var play_state: PlayState = .init(io, &r);
     defer play_state.deinit();
 
     var audio_device_config = zaudio.Device.Config.init(.playback);
